@@ -3,6 +3,7 @@ package autofiber
 import (
 	"net/http"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -12,6 +13,7 @@ func New(config ...fiber.Config) *AutoFiber {
 	return &AutoFiber{
 		App:           app,
 		docsGenerator: NewDocsGenerator(""),
+		validator:     validator.New(),
 	}
 }
 

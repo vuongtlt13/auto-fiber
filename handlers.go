@@ -124,3 +124,107 @@ func (af *AutoFiber) createStructHandler(handler interface{}, opts *RouteOptions
 
 	return handler.(fiber.Handler)
 }
+
+// createHandlerWithRequest creates a handler with automatic request parsing and validation
+func (af *AutoFiber) createHandlerWithRequest(handler interface{}, requestSchema interface{}, responseSchema interface{}) fiber.Handler {
+	handlerType := reflect.TypeOf(handler)
+	handlerValue := reflect.ValueOf(handler)
+
+	// Get the first method (assuming it's the handler method)
+	if handlerType.NumMethod() == 0 {
+		panic("handler must have at least one method")
+	}
+
+	method := handlerType.Method(0)
+	methodType := method.Type
+
+	// Check if method has the correct signature
+	if methodType.NumIn() != 2 || methodType.NumOut() != 2 {
+		panic("handler method must have signature: func(*fiber.Ctx, *RequestType) (interface{}, error)")
+	}
+
+	// Check first parameter is *fiber.Ctx
+	if methodType.In(0) != reflect.TypeOf((*fiber.Ctx)(nil)) {
+		panic("first parameter must be *fiber.Ctx")
+	}
+
+	// Check second parameter is pointer to request schema
+	expectedRequestType := reflect.PtrTo(reflect.TypeOf(requestSchema))
+	if methodType.In(1) != expectedRequestType {
+		panic("second parameter must be pointer to request schema")
+	}
+
+	// Check return types
+	if methodType.Out(0) != reflect.TypeOf((*interface{})(nil)).Elem() || methodType.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
+		panic("return types must be (interface{}, error)")
+	}
+
+	return func(c *fiber.Ctx) error {
+		// Create request instance
+		requestType := reflect.TypeOf(requestSchema)
+		if requestType.Kind() == reflect.Ptr {
+			requestType = requestType.Elem()
+		}
+		request := reflect.New(requestType).Interface()
+
+		// Parse request body
+		if err := c.BodyParser(request); err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"error":   "Invalid request body",
+				"details": err.Error(),
+			})
+		}
+
+		// Validate request
+		if err := af.validator.Struct(request); err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"error":   "Validation failed",
+				"details": err.Error(),
+			})
+		}
+
+		// Call handler method
+		args := []reflect.Value{
+			reflect.ValueOf(c),
+			reflect.ValueOf(request),
+		}
+
+		results := handlerValue.MethodByName(method.Name).Call(args)
+
+		// Check for error
+		if !results[1].IsNil() {
+			return results[1].Interface().(error)
+		}
+
+		// Return response data
+		responseData := results[0].Interface()
+
+		// Use ValidateAndJSON if response schema is provided
+		if responseSchema != nil {
+			return middleware.ValidateAndJSON(c, responseData)
+		}
+
+		return c.JSON(responseData)
+	}
+}
+
+// createHandlerWithRequestAndValidation creates a handler with request parsing, validation, and response validation
+func (af *AutoFiber) createHandlerWithRequestAndValidation(handler interface{}, requestSchema interface{}, responseSchema interface{}) fiber.Handler {
+	// Create the base handler
+	baseHandler := af.createHandlerWithRequest(handler, requestSchema, responseSchema)
+
+	// Wrap with response validation middleware if schema is provided
+	if responseSchema != nil {
+		validationMiddleware := middleware.ValidateResponse(responseSchema, af.validator)
+		return func(c *fiber.Ctx) error {
+			// Apply validation middleware
+			if err := validationMiddleware(c); err != nil {
+				return err
+			}
+			// Call base handler
+			return baseHandler(c)
+		}
+	}
+
+	return baseHandler
+}

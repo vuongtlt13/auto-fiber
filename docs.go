@@ -210,7 +210,7 @@ func (dg *DocsGenerator) GenerateJSON(info OpenAPIInfo) ([]byte, error) {
 	return json.MarshalIndent(spec, "", "  ")
 }
 
-// generatePath generates an OpenAPI path from route info
+// generatePath generates a path operation from route info
 func (dg *DocsGenerator) generatePath(route RouteInfo) OpenAPIPath {
 	operation := &OpenAPIOperation{
 		Tags:        route.Options.Tags,
@@ -220,13 +220,15 @@ func (dg *DocsGenerator) generatePath(route RouteInfo) OpenAPIPath {
 		Responses:   dg.generateResponses(route),
 	}
 
-	// Add request body if there's a request schema
+	// Add parameters and request body based on parse tags
 	if route.Options != nil && route.Options.RequestSchema != nil {
-		operation.RequestBody = dg.generateRequestBody(route.Options.RequestSchema)
+		parameters, requestBody := dg.generateParametersAndBody(route.Options.RequestSchema, route.Path)
+		operation.Parameters = parameters
+		operation.RequestBody = requestBody
+	} else {
+		// Fallback to path-only parameters
+		operation.Parameters = dg.generatePathParameters(route.Path)
 	}
-
-	// Add parameters for path variables
-	operation.Parameters = dg.generateParameters(route.Path)
 
 	path := OpenAPIPath{}
 	switch strings.ToUpper(route.Method) {
@@ -249,8 +251,154 @@ func (dg *DocsGenerator) generatePath(route RouteInfo) OpenAPIPath {
 	return path
 }
 
-// generateParameters generates parameters for path variables
-func (dg *DocsGenerator) generateParameters(path string) []OpenAPIParameter {
+// generateParametersAndBody generates parameters and request body from parse tags
+func (dg *DocsGenerator) generateParametersAndBody(schema interface{}, path string) ([]OpenAPIParameter, *OpenAPIRequestBody) {
+	var parameters []OpenAPIParameter
+	var bodyFields []string
+	var bodySchema OpenAPISchema
+
+	t := reflect.TypeOf(schema)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
+		return parameters, nil
+	}
+
+	// Add path parameters from URL
+	parameters = append(parameters, dg.generatePathParameters(path)...)
+
+	// Process fields based on parse tags
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		parseTag := field.Tag.Get("parse")
+
+		if parseTag == "" {
+			continue
+		}
+
+		// Parse the parse tag
+		parts := strings.Split(parseTag, ",")
+		sourcePart := parts[0]
+		sourceKey := strings.Split(sourcePart, ":")
+
+		if len(sourceKey) != 2 {
+			continue
+		}
+
+		source := sourceKey[0]
+		key := sourceKey[1]
+
+		// Check if required
+		required := strings.Contains(parseTag, "required")
+
+		// Get field name for JSON
+		jsonTag := field.Tag.Get("json")
+		jsonName := strings.Split(jsonTag, ",")[0]
+		if jsonName == "" {
+			jsonName = field.Name
+		}
+
+		// Convert field type to OpenAPI schema
+		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
+
+		// Add description and example
+		if desc := field.Tag.Get("description"); desc != "" {
+			fieldSchema.Description = desc
+		}
+		if example := field.Tag.Get("example"); example != "" {
+			fieldSchema.Example = example
+		}
+
+		switch source {
+		case "path":
+			// Path parameters are already handled by generatePathParameters
+			// Just update existing ones with field info
+			for i, param := range parameters {
+				if param.Name == key {
+					parameters[i].Schema = &fieldSchema
+					parameters[i].Description = fieldSchema.Description
+					break
+				}
+			}
+		case "query":
+			param := OpenAPIParameter{
+				Name:        key,
+				In:          "query",
+				Required:    required,
+				Description: fieldSchema.Description,
+				Schema:      &fieldSchema,
+			}
+			parameters = append(parameters, param)
+		case "header":
+			param := OpenAPIParameter{
+				Name:        key,
+				In:          "header",
+				Required:    required,
+				Description: fieldSchema.Description,
+				Schema:      &fieldSchema,
+			}
+			parameters = append(parameters, param)
+		case "cookie":
+			param := OpenAPIParameter{
+				Name:        key,
+				In:          "cookie",
+				Required:    required,
+				Description: fieldSchema.Description,
+				Schema:      &fieldSchema,
+			}
+			parameters = append(parameters, param)
+		case "body":
+			// Add to body schema
+			if bodySchema.Properties == nil {
+				bodySchema = OpenAPISchema{
+					Type:       "object",
+					Properties: make(map[string]OpenAPISchema),
+					Required:   []string{},
+				}
+			}
+			bodySchema.Properties[jsonName] = fieldSchema
+			if required {
+				bodySchema.Required = append(bodySchema.Required, jsonName)
+			}
+			bodyFields = append(bodyFields, jsonName)
+		case "auto":
+			// For auto, we need to determine based on HTTP method
+			// This is complex, so we'll add to body for now
+			if bodySchema.Properties == nil {
+				bodySchema = OpenAPISchema{
+					Type:       "object",
+					Properties: make(map[string]OpenAPISchema),
+					Required:   []string{},
+				}
+			}
+			bodySchema.Properties[jsonName] = fieldSchema
+			if required {
+				bodySchema.Required = append(bodySchema.Required, jsonName)
+			}
+			bodyFields = append(bodyFields, jsonName)
+		}
+	}
+
+	// Create request body if there are body fields
+	var requestBody *OpenAPIRequestBody
+	if len(bodyFields) > 0 {
+		requestBody = &OpenAPIRequestBody{
+			Required: true,
+			Content: map[string]OpenAPIMediaType{
+				"application/json": {
+					Schema: &bodySchema,
+				},
+			},
+		}
+	}
+
+	return parameters, requestBody
+}
+
+// generatePathParameters generates parameters for path variables
+func (dg *DocsGenerator) generatePathParameters(path string) []OpenAPIParameter {
 	var params []OpenAPIParameter
 
 	// Extract path parameters (e.g., /users/:id)
@@ -274,7 +422,7 @@ func (dg *DocsGenerator) generateParameters(path string) []OpenAPIParameter {
 	return params
 }
 
-// generateRequestBody generates request body from schema
+// generateRequestBody generates request body from schema (legacy method)
 func (dg *DocsGenerator) generateRequestBody(schema interface{}) *OpenAPIRequestBody {
 	schemaName := getSchemaName(schema)
 

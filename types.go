@@ -1,6 +1,7 @@
 package autofiber
 
 import (
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -10,6 +11,7 @@ type AutoFiber struct {
 	docsGenerator *DocsGenerator
 	docsInfo      *OpenAPIInfo
 	docsServers   []OpenAPIServer
+	validator     *validator.Validate
 }
 
 // AutoFiberGroup wraps Fiber group with auto-parse capabilities
