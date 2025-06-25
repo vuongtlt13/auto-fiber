@@ -5,7 +5,9 @@ A FastAPI-like wrapper for the Fiber web framework in Go, providing automatic re
 ## Features
 
 - **🔄 Auto Request Parsing**: Automatically parse requests from multiple sources (body, query, path, headers, cookies, form)
-- **🧠 Smart Parsing**: Auto-detect the best source based on HTTP method (GET: path→query→body, POST: body→path→query)
+- **🧠 Smart Parsing**: Auto-detect the best source based on HTTP method (GET: path→query, POST: body→path→query)
+- **🏷️ Unified Parse Tag**: Single `parse` tag with options like `required` and `default`
+- **🗺️ Map/Interface Parsing**: Parse structs from maps, interfaces, and other data structures
 - **✅ Request Validation**: Built-in validation using struct tags with `go-playground/validator`
 - **✅ Response Validation**: Validate response data before sending to client
 - **📚 Auto Documentation**: Generate OpenAPI 3.0 specification and Swagger UI
@@ -16,7 +18,7 @@ A FastAPI-like wrapper for the Fiber web framework in Go, providing automatic re
 
 ## Installation
 
-```bash
+```sh
 go get github.com/vuongtlt13/auto-fiber
 ```
 
@@ -27,26 +29,35 @@ package main
 
 import (
     "time"
-    "autofiber"
+    "github.com/vuongtlt13/auto-fiber"
     "github.com/gofiber/fiber/v2"
 )
 
 // Request schema with parse tag
 type CreateUserRequest struct {
     // Path parameter
-    OrgID int `parse:"path:org_id" validate:"required" description:"Organization ID"`
+    OrgID int `parse:"path:org_id,required" description:"Organization ID"`
 
     // Query parameters
-    Role     string `parse:"query:role" validate:"required,oneof=admin user" description:"User role"`
-    IsActive bool   `parse:"query:active" description:"User active status"`
+    Role     string `parse:"query:role,required" description:"User role"`
+    IsActive bool   `parse:"query:active,default:true" description:"User active status"`
 
     // Headers
-    APIKey string `parse:"header:X-API-Key" validate:"required" description:"API key"`
+    APIKey string `parse:"header:X-API-Key,required" description:"API key"`
 
     // Body fields
-    Email    string `parse:"body:email" validate:"required,email" description:"User email"`
-    Password string `parse:"body:password" validate:"required,min=6" description:"User password"`
-    Name     string `parse:"body:name" validate:"required" description:"User full name"`
+    Email    string `parse:"body:email,required" description:"User email"`
+    Password string `parse:"body:password,required" description:"User password"`
+    Name     string `parse:"body:name,required" description:"User full name"`
+}
+
+// Simple request using auto parsing (no parse tag needed)
+type SimpleUserRequest struct {
+    Email    string `json:"email" validate:"required,email" description:"User email"`
+    Password string `json:"password" validate:"required,min=6" description:"User password"`
+    Name     string `json:"name" validate:"required" description:"User full name"`
+    Age      int    `json:"age" validate:"gte=18" description:"User age"`
+    IsActive bool   `json:"is_active" description:"User active status"`
 }
 
 // Response schema with validation
@@ -74,22 +85,42 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interfac
     }, nil
 }
 
+func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (interface{}, error) {
+    return UserResponse{
+        ID:        2,
+        Email:     req.Email,
+        Name:      req.Name,
+        Role:      "user", // Default role
+        IsActive:  req.IsActive,
+        OrgID:     1, // Default org
+        CreatedAt: time.Now(),
+    }, nil
+}
+
 func main() {
     app := autofiber.New().
         WithDocsInfo(autofiber.OpenAPIInfo{
             Title:       "AutoFiber API",
-            Description: "A sample API with parse tag and validation",
+            Description: "A sample API with unified parse tag and auto parsing",
             Version:     "1.0.0",
         })
 
     handler := &UserHandler{}
 
-    // Register route with auto-parsing and response validation
+    // Register route with parse tag
     app.Post("/organizations/:org_id/users", handler.CreateUser,
         autofiber.WithRequestSchema(CreateUserRequest{}),
         autofiber.WithResponseSchema(UserResponse{}),
         autofiber.WithDescription("Create a new user in an organization"),
         autofiber.WithTags("users", "admin"),
+    )
+
+    // Register route with auto parsing (no parse tag needed)
+    app.Post("/users/simple", handler.CreateSimpleUser,
+        autofiber.WithRequestSchema(SimpleUserRequest{}),
+        autofiber.WithResponseSchema(UserResponse{}),
+        autofiber.WithDescription("Create a simple user using auto parsing"),
+        autofiber.WithTags("users"),
     )
 
     // Serve documentation
@@ -102,7 +133,7 @@ func main() {
 
 ## Parse Tag
 
-AutoFiber uses the `parse` tag to specify where each field should be parsed from:
+AutoFiber uses a unified `parse` tag to specify where each field should be parsed from:
 
 ### Parse Tag Format
 
@@ -131,77 +162,92 @@ type Request struct {
 - `body` - JSON body (for POST/PUT/PATCH requests)
 - `auto` - Smart detection based on HTTP method
 
-### Smart Parsing with Auto
-
-Use `parse:"auto:key"` for automatic source detection:
-
-```go
-type GetUserRequest struct {
-    // Auto-detect based on HTTP method
-    UserID int `parse:"auto:user_id" validate:"required"`
-    Page   int `parse:"auto:page" validate:"gte=1"`
-    Active bool `parse:"auto:active"`
-}
-```
-
-**HTTP Method Priority:**
-
-- **GET**: `path` → `query` → `body`
-- **POST/PUT/PATCH**: `body` → `path` → `query`
-- **DELETE**: `path` → `query`
-
 ### Parse Tag Options
 
-```go
-type Request struct {
-    // Required field
-    UserID int `parse:"path:user_id,required"`
+- `required` - Field is required (returns 422 if missing)
+- `default:value` - Default value if field is empty
 
-    // With default value
-    Page   int  `parse:"query:page,default:1"`
-    Limit  int  `parse:"query:limit,default:10"`
-    Active bool `parse:"query:active,default:true"`
+## Auto Parsing
 
-    // Multiple options
-    Role string `parse:"query:role,required,default:user"`
-}
-```
-
-## Smart Parsing
-
-AutoFiber automatically detects the best source for parsing fields based on HTTP method:
+When no `parse` tag is specified, AutoFiber automatically detects the best source:
 
 ### HTTP Method Priority
 
-- **GET**: `path` → `query` → `body`
-- **POST/PUT/PATCH**: `body` → `path` → `query`
-- **DELETE**: `path` → `query`
+- **GET**: `path` → `query` (no body parsing)
+- **POST/PUT/PATCH**: `path` → `query` → `body`
+- **DELETE**: `path` → `query` (no body parsing)
 
-### Field Source Tags
+### Auto Parsing Example
+
+```go
+type AutoRequest struct {
+    // These will be auto-detected based on HTTP method
+    UserID int    `json:"user_id" validate:"required" description:"User ID"`
+    Page   int    `json:"page" validate:"gte=1" description:"Page number"`
+    Email  string `json:"email" validate:"required,email" description:"User email"`
+    Name   string `json:"name" validate:"required" description:"User name"`
+}
+
+// For GET /users/:user_id?page=1
+// - user_id: parsed from path
+// - page: parsed from query
+// - email, name: not parsed (GET doesn't parse body)
+
+// For POST /users/:user_id?page=1
+// - user_id: parsed from path
+// - page: parsed from query
+// - email, name: parsed from JSON body
+```
+
+## JSON Tag Support
+
+AutoFiber supports `json` tag for field aliasing:
 
 ```go
 type Request struct {
-    // Using parse tag (recommended)
-    UserID int `parse:"path:user_id" validate:"required" description:"User ID from path"`
-    Page   int `parse:"query:page" validate:"gte=1" description:"Page number"`
-    Token  string `parse:"header:Authorization" validate:"required" description:"Bearer token"`
-    Email  string `parse:"body:email" validate:"required,email" description:"User email"`
-
-    // Smart parsing with auto
-    ID     int  `parse:"auto:id" validate:"required" description:"Auto-detected source"`
-    Active bool `parse:"auto:active" description:"Auto-detected source"`
+    // Use json tag to alias field names
+    Email    string `json:"user_email" parse:"body:email" validate:"required,email"`
+    Password string `json:"user_password" parse:"body:password" validate:"required,min=6"`
+    Name     string `json:"full_name" parse:"body:name" validate:"required"`
 }
 ```
 
-### Supported Sources
+## Map and Interface Parsing
 
-- `path` - URL path parameters (`/users/:id`)
-- `query` - Query string parameters (`?page=1&limit=10`)
-- `header` - HTTP headers (`Authorization: Bearer token`)
-- `cookie` - Cookies (`session_id=abc123`)
-- `form` - Form data (`multipart/form-data`)
-- `body` - JSON body (for POST/PUT/PATCH requests)
-- `auto` - Smart detection based on HTTP method
+AutoFiber provides utilities to parse structs from maps and interfaces:
+
+### Parse From Map
+
+```go
+// Parse from map[string]interface{}
+userData := map[string]interface{}{
+    "email":     "john@example.com",
+    "password":  "secret123",
+    "name":      "John Doe",
+    "age":       25,
+    "is_active": true,
+}
+
+var req SimpleUserRequest
+if err := autofiber.ParseFromMap(userData, &req); err != nil {
+    return err
+}
+```
+
+### Parse From Interface
+
+```go
+// Parse from any interface{} (map, struct, etc.)
+data := map[string]string{
+    "email": "john@example.com",
+    "name":  "John Doe",
+}
+
+var req SimpleUserRequest
+if err := autofiber.ParseFromInterface(data, &req); err != nil {
+    return err
+}
+```
 
 ## Request Validation
 
@@ -209,10 +255,10 @@ Use struct tags for validation:
 
 ```go
 type UserRequest struct {
-    Email     string `parse:"body:email" validate:"required,email" description:"User email"`
-    Password  string `parse:"body:password" validate:"required,min=6,max=50" description:"User password"`
+    Email     string `parse:"body:email,required" description:"User email"`
+    Password  string `parse:"body:password,required" description:"User password"`
     Age       int    `parse:"body:age" validate:"gte=18,lte=100" description:"User age"`
-    Role      string `parse:"body:role" validate:"required,oneof=admin user guest" description:"User role"`
+    Role      string `parse:"body:role,required" validate:"oneof=admin user guest" description:"User role"`
     IsActive  bool   `parse:"body:is_active" description:"User active status"`
 }
 ```
@@ -255,7 +301,7 @@ app.Post("/users", handler.CreateUser,
 
 ## API Documentation
 
-AutoFiber automatically generates OpenAPI 3.0 specification and serves Swagger UI based on your parse tags:
+AutoFiber automatically generates OpenAPI 3.0 specification and serves Swagger UI:
 
 ```go
 app := autofiber.New().
@@ -280,58 +326,78 @@ app.ServeSwaggerUI("/swagger", "/docs") // Swagger UI at /swagger
 
 ### Smart Documentation Generation
 
-AutoFiber automatically generates proper OpenAPI documentation from your parse tags:
+AutoFiber automatically generates proper OpenAPI documentation from your parse tags and auto parsing:
 
 ```go
 type CreateUserRequest struct {
     // Path parameter - appears in "Parameters" section
-    OrgID int `parse:"path:org_id" validate:"required" description:"Organization ID"`
+    OrgID int `parse:"path:org_id,required" description:"Organization ID"`
 
     // Query parameters - appear in "Parameters" section
-    Role     string `parse:"query:role" validate:"required,oneof=admin user" description:"User role"`
-    IsActive bool   `parse:"query:active" description:"User active status"`
+    Role     string `parse:"query:role,required" description:"User role"`
+    IsActive bool   `parse:"query:active,default:true" description:"User active status"`
 
     // Header parameters - appear in "Parameters" section
-    APIKey string `parse:"header:X-API-Key" validate:"required" description:"API key"`
+    APIKey string `parse:"header:X-API-Key,required" description:"API key"`
 
     // Body fields - appear in "Request Body" section
-    Email    string `parse:"body:email" validate:"required,email" description:"User email"`
-    Password string `parse:"body:password" validate:"required,min=6" description:"User password"`
-    Name     string `parse:"body:name" validate:"required" description:"User full name"`
+    Email    string `parse:"body:email,required" description:"User email"`
+    Password string `parse:"body:password,required" description:"User password"`
+    Name     string `parse:"body:name,required" description:"User full name"`
+}
+
+type AutoRequest struct {
+    // Auto-detected fields - appear in appropriate sections
+    UserID int    `json:"user_id" validate:"required" description:"User ID"`
+    Page   int    `json:"page" validate:"gte=1" description:"Page number"`
+    Email  string `json:"email" validate:"required,email" description:"User email"`
+    Name   string `json:"name" validate:"required" description:"User name"`
 }
 ```
 
 **Generated OpenAPI Documentation:**
 
-- **Parameters**: `org_id` (path), `role` (query), `active` (query), `X-API-Key` (header)
-- **Request Body**: `email`, `password`, `name` (JSON schema)
-- **Validation**: Required fields, email format, min length, enum values
+- **Parameters**: Path, query, header, cookie parameters
+- **Request Body**: Body fields and auto-detected body fields
+- **Validation**: Required fields, format validation, enum values
 - **Descriptions**: Field descriptions from struct tags
+- **Default Values**: From `default` option in parse tag
 
 ### Documentation Features
 
 - **Automatic Parameter Detection**: Path, query, header, cookie parameters
-- **Request Body Schema**: Only body fields appear in request body
+- **Request Body Schema**: Body fields and auto-detected body fields
+- **JSON Tag Support**: Field aliasing in documentation
 - **Validation Rules**: Required fields, format validation, enum values
 - **Field Descriptions**: From `description` struct tags
-- **Examples**: From `example` struct tags
+- **Default Values**: From `default` option in parse tag
 - **Type Safety**: Proper OpenAPI types (string, integer, boolean, etc.)
 - **Interactive Testing**: Swagger UI for testing APIs directly
+- **Security Schemes**: Bearer token authentication support
+
+## Error Handling
+
+AutoFiber provides clear error responses:
+
+- **400 Bad Request**: Parse errors (invalid JSON, type conversion)
+- **422 Unprocessable Entity**: Validation errors (missing required fields, format validation)
+- **500 Internal Server Error**: Response validation errors
 
 ## Project Structure
 
 ```
 auto-fiber/
-├── autofiber.go          # Core initialization and group methods
+├── app.go                # Core initialization and group methods
 ├── types.go              # Type definitions and structs
 ├── options.go            # Route options and configuration
 ├── handlers.go           # Handler creation and middleware logic
 ├── routes.go             # HTTP method route handlers
 ├── docs_config.go        # Documentation configuration
 ├── docs.go               # OpenAPI specification generation
-├── pkg/
-│   └── middleware/
-│       └── middleware.go  # Request/response parsing and validation
+├── validator.go          # Validation logic
+├── parser.go             # Parsing logic
+├── map_parser.go         # Map parsing logic
+├── middleware.go         # Middleware main flow
 └── example/
     └── main.go           # Complete usage example
 ```
@@ -341,19 +407,21 @@ auto-fiber/
 See the `example/` directory for complete working examples:
 
 - **Basic Usage**: Simple request/response handling
-- **Parse Tag**: Using parse tag for field source specification
-- **Smart Parsing**: Auto-detection of field sources with `auto`
+- **Parse Tag**: Using unified parse tag for field source specification
+- **Auto Parsing**: Automatic field source detection
+- **JSON Tag**: Field aliasing
+- **Map Parsing**: Parsing structs from maps and interfaces
 - **Response Validation**: Validating response data
 - **API Documentation**: OpenAPI and Swagger UI
 
-## Contributing
+## Run Example
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+```bash
+go run example/main.go
+```
 
-## License
+Then visit:
 
-MIT License - see LICENSE file for details.
+- API: http://localhost:3000
+- Swagger UI: http://localhost:3000/swagger
+- OpenAPI JSON: http://localhost:3000/docs

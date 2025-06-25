@@ -1,11 +1,12 @@
 package main
 
 import (
+	"log"
 	"time"
 
-	"autofiber"
-
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	autofiber "github.com/vuongtlt13/auto-fiber"
 )
 
 // Request schemas with multi-source parsing
@@ -49,7 +50,7 @@ type GetUserRequest struct {
 	Authorization string `parse:"header:Authorization" validate:"required" description:"Bearer token"`
 }
 
-// CreateUserRequest with complex parsing from multiple sources using parse tag
+// Request schema with parse tag and json tag support
 type CreateUserRequest struct {
 	// Path parameter
 	OrgID int `parse:"path:org_id" validate:"required" description:"Organization ID"`
@@ -61,10 +62,20 @@ type CreateUserRequest struct {
 	// Headers
 	APIKey string `parse:"header:X-API-Key" validate:"required" description:"API key"`
 
-	// Body fields
-	Email    string `parse:"body:email" validate:"required,email" description:"User email"`
-	Password string `parse:"body:password" validate:"required,min=6" description:"User password"`
-	Name     string `parse:"body:name" validate:"required" description:"User full name"`
+	// Body fields with json tag aliasing
+	Email    string `json:"user_email" parse:"body:email" validate:"required,email" description:"User email"`
+	Password string `json:"user_password" parse:"body:password" validate:"required,min=6" description:"User password"`
+	Name     string `json:"full_name" parse:"body:name" validate:"required" description:"User full name"`
+}
+
+// Request schema using only json tag (fallback parsing)
+type SimpleUserRequest struct {
+	// These will be parsed from JSON body using json tag names
+	Email    string `json:"email" validate:"required,email" description:"User email"`
+	Password string `json:"password" validate:"required,min=6" description:"User password"`
+	Name     string `json:"name" validate:"required" description:"User full name"`
+	Age      int    `json:"age" validate:"gte=18" description:"User age"`
+	IsActive bool   `json:"is_active" description:"User active status"`
 }
 
 // UserResponse represents user data with validation
@@ -177,9 +188,51 @@ func (h *AuthHandler) Health(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok", "timestamp": time.Now()})
 }
 
+type UserHandler struct{}
+
+func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (interface{}, error) {
+	return UserResponse{
+		ID:        2,
+		Email:     req.Email,
+		Name:      req.Name,
+		Role:      "user", // Default role
+		IsActive:  req.IsActive,
+		OrgID:     1, // Default org
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+func (h *UserHandler) CreateUserFromMap(c *fiber.Ctx) (interface{}, error) {
+	// Example of parsing from map
+	userData := map[string]interface{}{
+		"email":     "john@example.com",
+		"password":  "secret123",
+		"name":      "John Doe",
+		"age":       25,
+		"is_active": true,
+	}
+
+	var req SimpleUserRequest
+	if err := autofiber.ParseFromMap(userData, &req); err != nil {
+		return nil, err
+	}
+
+	return UserResponse{
+		ID:        3,
+		Email:     req.Email,
+		Name:      req.Name,
+		Role:      "user",
+		IsActive:  req.IsActive,
+		OrgID:     1,
+		CreatedAt: time.Now(),
+	}, nil
+}
+
 func main() {
 	// Create AutoFiber app with docs configuration
-	app := autofiber.New().
+	app := autofiber.New(fiber.Config{
+		EnablePrintRoutes: true,
+	}).
 		WithDocsInfo(autofiber.OpenAPIInfo{
 			Title:       "AutoFiber Parse Tag Example",
 			Description: "Demonstrating parse tag for field source specification",
@@ -193,6 +246,9 @@ func main() {
 			URL:         "http://localhost:3000",
 			Description: "Development server",
 		})
+
+	// Add Fiber logger middleware
+	app.Use(logger.New())
 
 	handler := &AuthHandler{}
 
@@ -242,6 +298,7 @@ func main() {
 	app.ServeDocs("/docs")
 	app.ServeSwaggerUI("/swagger", "/docs")
 
-	// Start server
+	// Start server with log
+	log.Println("Server is running at http://localhost:3000")
 	app.Listen(":3000")
 }

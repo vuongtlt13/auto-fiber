@@ -110,7 +110,8 @@ type OpenAPISchema struct {
 
 // OpenAPIComponents represents reusable components
 type OpenAPIComponents struct {
-	Schemas map[string]OpenAPISchema `json:"schemas,omitempty"`
+	Schemas         map[string]OpenAPISchema     `json:"schemas,omitempty"`
+	SecuritySchemes map[string]map[string]string `json:"securitySchemes,omitempty"`
 }
 
 // OpenAPITag represents a tag
@@ -183,7 +184,8 @@ func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
 		Info:    info,
 		Paths:   make(map[string]OpenAPIPath),
 		Components: OpenAPIComponents{
-			Schemas: dg.schemas,
+			Schemas:         dg.schemas,
+			SecuritySchemes: make(map[string]map[string]string),
 		},
 		Tags: dg.getTagsList(),
 	}
@@ -195,10 +197,25 @@ func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
 		}
 	}
 
+	// Track if any route needs bearer auth
+	needsBearerAuth := false
+
 	// Generate paths from routes
 	for _, route := range dg.routes {
-		path := dg.generatePath(route)
+		path, hasBearer := dg.generatePathWithSecurity(route)
+		if hasBearer {
+			needsBearerAuth = true
+		}
 		spec.Paths[route.Path] = path
+	}
+
+	// Add bearerAuth security scheme if needed
+	if needsBearerAuth {
+		spec.Components.SecuritySchemes["bearerAuth"] = map[string]string{
+			"type":         "http",
+			"scheme":       "bearer",
+			"bearerFormat": "JWT",
+		}
 	}
 
 	return spec
@@ -211,7 +228,7 @@ func (dg *DocsGenerator) GenerateJSON(info OpenAPIInfo) ([]byte, error) {
 }
 
 // generatePath generates a path operation from route info
-func (dg *DocsGenerator) generatePath(route RouteInfo) OpenAPIPath {
+func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath, bool) {
 	operation := &OpenAPIOperation{
 		Tags:        route.Options.Tags,
 		Summary:     route.Options.Description,
@@ -220,11 +237,16 @@ func (dg *DocsGenerator) generatePath(route RouteInfo) OpenAPIPath {
 		Responses:   dg.generateResponses(route),
 	}
 
+	hasBearer := false
 	// Add parameters and request body based on parse tags
 	if route.Options != nil && route.Options.RequestSchema != nil {
-		parameters, requestBody := dg.generateParametersAndBody(route.Options.RequestSchema, route.Path)
+		parameters, requestBody, needsBearer := dg.generateParametersAndBodyWithSecurity(route.Options.RequestSchema, route.Path)
 		operation.Parameters = parameters
 		operation.RequestBody = requestBody
+		if needsBearer {
+			operation.Security = []map[string][]string{{"bearerAuth": {}}}
+			hasBearer = true
+		}
 	} else {
 		// Fallback to path-only parameters
 		operation.Parameters = dg.generatePathParameters(route.Path)
@@ -248,14 +270,15 @@ func (dg *DocsGenerator) generatePath(route RouteInfo) OpenAPIPath {
 		path.Options = operation
 	}
 
-	return path
+	return path, hasBearer
 }
 
 // generateParametersAndBody generates parameters and request body from parse tags
-func (dg *DocsGenerator) generateParametersAndBody(schema interface{}, path string) ([]OpenAPIParameter, *OpenAPIRequestBody) {
+func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{}, path string) ([]OpenAPIParameter, *OpenAPIRequestBody, bool) {
 	var parameters []OpenAPIParameter
 	var bodyFields []string
 	var bodySchema OpenAPISchema
+	needsBearer := false
 
 	t := reflect.TypeOf(schema)
 	if t.Kind() == reflect.Ptr {
@@ -263,35 +286,19 @@ func (dg *DocsGenerator) generateParametersAndBody(schema interface{}, path stri
 	}
 
 	if t.Kind() != reflect.Struct {
-		return parameters, nil
+		return parameters, nil, false
 	}
 
 	// Add path parameters from URL
 	parameters = append(parameters, dg.generatePathParameters(path)...)
 
+	// Track which fields are handled by parse tags
+	handledFields := make(map[string]bool)
+
 	// Process fields based on parse tags
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		parseTag := field.Tag.Get("parse")
-
-		if parseTag == "" {
-			continue
-		}
-
-		// Parse the parse tag
-		parts := strings.Split(parseTag, ",")
-		sourcePart := parts[0]
-		sourceKey := strings.Split(sourcePart, ":")
-
-		if len(sourceKey) != 2 {
-			continue
-		}
-
-		source := sourceKey[0]
-		key := sourceKey[1]
-
-		// Check if required
-		required := strings.Contains(parseTag, "required")
 
 		// Get field name for JSON
 		jsonTag := field.Tag.Get("json")
@@ -310,6 +317,38 @@ func (dg *DocsGenerator) generateParametersAndBody(schema interface{}, path stri
 		if example := field.Tag.Get("example"); example != "" {
 			fieldSchema.Example = example
 		}
+
+		if parseTag == "" {
+			// No parse tag - assume it's a body field (matching middleware behavior)
+			if bodySchema.Properties == nil {
+				bodySchema = OpenAPISchema{
+					Type:       "object",
+					Properties: make(map[string]OpenAPISchema),
+					Required:   []string{},
+				}
+			}
+			bodySchema.Properties[jsonName] = fieldSchema
+			bodyFields = append(bodyFields, jsonName)
+			handledFields[jsonName] = true
+			continue
+		}
+
+		// Parse the parse tag
+		parts := strings.Split(parseTag, ",")
+		sourcePart := parts[0]
+		sourceKey := strings.Split(sourcePart, ":")
+
+		if len(sourceKey) != 2 {
+			continue
+		}
+
+		source := sourceKey[0]
+		key := sourceKey[1]
+
+		// Check if required
+		required := strings.Contains(parseTag, "required")
+
+		handledFields[jsonName] = true
 
 		switch source {
 		case "path":
@@ -332,14 +371,21 @@ func (dg *DocsGenerator) generateParametersAndBody(schema interface{}, path stri
 			}
 			parameters = append(parameters, param)
 		case "header":
-			param := OpenAPIParameter{
-				Name:        key,
-				In:          "header",
-				Required:    required,
-				Description: fieldSchema.Description,
-				Schema:      &fieldSchema,
+			// Special case: Authorization header -> use security scheme
+			if strings.ToLower(key) == "authorization" {
+				needsBearer = true
+				// Do not add as parameter, will be handled by security
+				continue
+			} else {
+				param := OpenAPIParameter{
+					Name:        key,
+					In:          "header",
+					Required:    required,
+					Description: fieldSchema.Description,
+					Schema:      &fieldSchema,
+				}
+				parameters = append(parameters, param)
 			}
-			parameters = append(parameters, param)
 		case "cookie":
 			param := OpenAPIParameter{
 				Name:        key,
@@ -394,7 +440,7 @@ func (dg *DocsGenerator) generateParametersAndBody(schema interface{}, path stri
 		}
 	}
 
-	return parameters, requestBody
+	return parameters, requestBody, needsBearer
 }
 
 // generatePathParameters generates parameters for path variables
