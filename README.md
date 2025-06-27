@@ -4,7 +4,7 @@ A FastAPI-like wrapper for the Fiber web framework in Go, providing automatic re
 
 ## Features
 
-- **🔄 Auto Request Parsing**: Automatically parse requests from multiple sources (body, query, path, headers, cookies, form)
+- **🔄 Complete Request/Response Flow**: Parse request → Validate request → Execute handler → Validate response → Return JSON
 - **🧠 Smart Parsing**: Auto-detect the best source based on HTTP method (GET: path→query, POST: body→path→query)
 - **🏷️ Unified Parse Tag**: Single `parse` tag with options like `required` and `default`
 - **🗺️ Map/Interface Parsing**: Parse structs from maps, interfaces, and other data structures
@@ -73,8 +73,11 @@ type UserResponse struct {
 
 type UserHandler struct{}
 
+// Handler with complete flow: parse request → validate request → execute handler → validate response
 func (h *UserHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
-    return UserResponse{
+    // 1. Request is automatically parsed and validated
+    // 2. Business logic here
+    user := UserResponse{
         ID:        1,
         Email:     req.Email,
         Name:      req.Name,
@@ -82,7 +85,9 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interfac
         IsActive:  req.IsActive,
         OrgID:     req.OrgID,
         CreatedAt: time.Now(),
-    }, nil
+    }
+    // 3. Response will be automatically validated before returning JSON
+    return user, nil
 }
 
 func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (interface{}, error) {
@@ -101,24 +106,24 @@ func main() {
     app := autofiber.New().
         WithDocsInfo(autofiber.OpenAPIInfo{
             Title:       "AutoFiber API",
-            Description: "A sample API with unified parse tag and auto parsing",
+            Description: "A sample API with complete request/response flow",
             Version:     "1.0.0",
         })
 
     handler := &UserHandler{}
 
-    // Register route with parse tag
+    // Register route with complete flow
     app.Post("/organizations/:org_id/users", handler.CreateUser,
         autofiber.WithRequestSchema(CreateUserRequest{}),
-        autofiber.WithResponseSchema(UserResponse{}),
+        autofiber.WithResponseSchema(UserResponse{}), // Enables response validation
         autofiber.WithDescription("Create a new user in an organization"),
         autofiber.WithTags("users", "admin"),
     )
 
-    // Register route with auto parsing (no parse tag needed)
+    // Register route with auto parsing and response validation
     app.Post("/users/simple", handler.CreateSimpleUser,
         autofiber.WithRequestSchema(SimpleUserRequest{}),
-        autofiber.WithResponseSchema(UserResponse{}),
+        autofiber.WithResponseSchema(UserResponse{}), // Enables response validation
         autofiber.WithDescription("Create a simple user using auto parsing"),
         autofiber.WithTags("users"),
     )
@@ -130,6 +135,79 @@ func main() {
     app.Listen(":3000")
 }
 ```
+
+## Complete Request/Response Flow
+
+AutoFiber provides a complete flow similar to FastAPI:
+
+```
+Parse Request → Validate Request → Execute Handler → Validate Response → Return JSON
+```
+
+### Flow Details
+
+1. **Parse Request**: Automatically parse from multiple sources (body, query, path, headers, cookies)
+2. **Validate Request**: Validate parsed data against struct tags
+3. **Execute Handler**: Run your business logic
+4. **Validate Response**: Validate response data before sending
+5. **Return JSON**: Send validated response to client
+
+### Handler Signatures
+
+```go
+// Simple handler (no request parsing)
+func (h *Handler) SimpleHandler(c *fiber.Ctx) error {
+    return c.JSON(fiber.Map{"message": "Hello"})
+}
+
+// Handler with request parsing (no response validation)
+func (h *Handler) RequestHandler(c *fiber.Ctx, req *RequestSchema) error {
+    return c.JSON(fiber.Map{"data": req})
+}
+
+// Handler with complete flow (request parsing + response validation)
+func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
+    // Return data and error - response will be automatically validated
+    return ResponseSchema{...}, nil
+}
+```
+
+### Response Validation
+
+When you specify `WithResponseSchema()`, AutoFiber automatically validates the response:
+
+```go
+// Response schema with validation
+type UserResponse struct {
+    ID        int       `json:"id" validate:"required" description:"User ID"`
+    Email     string    `json:"email" validate:"required,email" description:"User email"`
+    Name      string    `json:"name" validate:"required" description:"User name"`
+    Role      string    `json:"role" validate:"required,oneof=admin user" description:"User role"`
+    CreatedAt time.Time `json:"created_at" validate:"required" description:"Account creation date"`
+}
+
+// Route with response validation
+app.Post("/users", handler.CreateUser,
+    autofiber.WithRequestSchema(CreateUserRequest{}),
+    autofiber.WithResponseSchema(UserResponse{}), // This enables response validation
+    autofiber.WithDescription("Create a new user"),
+)
+
+// Handler that returns validated response
+func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
+    user := UserResponse{
+        ID:        1,
+        Email:     req.Email,
+        Name:      req.Name,
+        Role:      "user",
+        CreatedAt: time.Now(),
+    }
+    // Response will be automatically validated against UserResponse schema
+    return user, nil
+}
+```
+
+If response validation fails, AutoFiber returns a 500 error with validation details.
 
 ## Parse Tag
 
@@ -263,28 +341,6 @@ type UserRequest struct {
 }
 ```
 
-## Response Validation
-
-AutoFiber can validate response data before sending to clients:
-
-```go
-// Response schema with validation
-type UserResponse struct {
-    ID        int       `json:"id" validate:"required" description:"User ID"`
-    Email     string    `json:"email" validate:"required,email" description:"User email"`
-    Name      string    `json:"name" validate:"required" description:"User name"`
-    Role      string    `json:"role" validate:"required,oneof=admin user" description:"User role"`
-    CreatedAt time.Time `json:"created_at" validate:"required" description:"Account creation date"`
-}
-
-// Register route with response validation
-app.Post("/users", handler.CreateUser,
-    autofiber.WithRequestSchema(CreateUserRequest{}),
-    autofiber.WithResponseSchema(UserResponse{}), // This enables response validation
-    autofiber.WithDescription("Create a new user"),
-)
-```
-
 ## Route Options
 
 Configure routes with flexible options:
@@ -359,6 +415,7 @@ type AutoRequest struct {
 
 - **Parameters**: Path, query, header, cookie parameters
 - **Request Body**: Body fields and auto-detected body fields
+- **Response Schema**: Response validation schema
 - **Validation**: Required fields, format validation, enum values
 - **Descriptions**: Field descriptions from struct tags
 - **Default Values**: From `default` option in parse tag
@@ -367,6 +424,7 @@ type AutoRequest struct {
 
 - **Automatic Parameter Detection**: Path, query, header, cookie parameters
 - **Request Body Schema**: Body fields and auto-detected body fields
+- **Response Schema**: Response validation schema
 - **JSON Tag Support**: Field aliasing in documentation
 - **Validation Rules**: Required fields, format validation, enum values
 - **Field Descriptions**: From `description` struct tags
@@ -390,29 +448,31 @@ auto-fiber/
 ├── app.go                # Core initialization and group methods
 ├── types.go              # Type definitions and structs
 ├── options.go            # Route options and configuration
-├── handlers.go           # Handler creation and middleware logic
+├── handlers.go           # Handler creation and complete flow logic
 ├── routes.go             # HTTP method route handlers
 ├── docs_config.go        # Documentation configuration
 ├── docs.go               # OpenAPI specification generation
 ├── validator.go          # Validation logic
 ├── parser.go             # Parsing logic
 ├── map_parser.go         # Map parsing logic
-├── middleware.go         # Middleware main flow
+├── middleware.go         # Middleware and response validation
+├── group.go              # Route group functionality
 └── example/
-    └── main.go           # Complete usage example
+    └── main.go           # Complete usage example with full flow
 ```
 
 ## Examples
 
 See the `example/` directory for complete working examples:
 
-- **Basic Usage**: Simple request/response handling
-- **Parse Tag**: Using unified parse tag for field source specification
+- **Complete Flow**: Parse request → Validate request → Execute handler → Validate response
+- **Request Parsing**: Parse from multiple sources (body, query, path, headers, cookies)
+- **Response Validation**: Validate response data before sending
 - **Auto Parsing**: Automatic field source detection
 - **JSON Tag**: Field aliasing
 - **Map Parsing**: Parsing structs from maps and interfaces
-- **Response Validation**: Validating response data
 - **API Documentation**: OpenAPI and Swagger UI
+- **Custom Validation**: Custom validation functions
 
 ## Run Example
 
@@ -425,3 +485,12 @@ Then visit:
 - API: http://localhost:3000
 - Swagger UI: http://localhost:3000/swagger
 - OpenAPI JSON: http://localhost:3000/docs
+
+### Example Endpoints
+
+The example includes endpoints demonstrating the complete flow:
+
+- `POST /register` - Parse request → Validate request → Execute handler → Validate response
+- `POST /login-with-validation` - Complete flow with login response validation
+- `GET /users/:user_id` - Smart parsing with response validation
+- `POST /organizations/:org_id/users` - Multi-source parsing with response validation

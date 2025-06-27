@@ -19,6 +19,12 @@ Thumbs.db
 *.out
 go.work
 
+# Coverage files
+coverage.out
+coverage.html
+*.cover
+*.coverprofile
+
 # Build artifacts
 example-app
 dist/

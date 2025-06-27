@@ -51,7 +51,7 @@ func getFieldInfo(field reflect.StructField, httpMethod string) *FieldInfo {
 		return parseParseTag(parseTag, field)
 	}
 
-	// If no parse tag, use auto parsing
+	// If no parse tag, use auto parsing with json tag or field name
 	var key string
 	if jsonTag := field.Tag.Get("json"); jsonTag != "" && jsonTag != "-" {
 		jsonParts := strings.Split(jsonTag, ",")

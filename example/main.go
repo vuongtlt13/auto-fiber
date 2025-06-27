@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	autofiber "github.com/vuongtlt13/auto-fiber"
@@ -89,10 +90,24 @@ type UserResponse struct {
 	CreatedAt time.Time `json:"created_at" validate:"required" description:"Account creation date"`
 }
 
+// ErrorResponse schema for error responses
+type ErrorResponse struct {
+	Error   string `json:"error" validate:"required" description:"Error message"`
+	Details string `json:"details,omitempty" description:"Error details"`
+	Code    int    `json:"code" validate:"required" description:"HTTP status code"`
+}
+
+// LoginResponse schema for login responses
+type LoginResponse struct {
+	Token     string       `json:"token" validate:"required" description:"JWT token"`
+	User      UserResponse `json:"user" validate:"required" description:"User information"`
+	ExpiresAt time.Time    `json:"expires_at" validate:"required" description:"Token expiration time"`
+}
+
 // Handler
 type AuthHandler struct{}
 
-// Handler with request parsing
+// Handler with request parsing (no response validation)
 func (h *AuthHandler) Login(c *fiber.Ctx, req *LoginRequest) error {
 	// req is automatically parsed and validated
 	return c.JSON(fiber.Map{
@@ -102,10 +117,11 @@ func (h *AuthHandler) Login(c *fiber.Ctx, req *LoginRequest) error {
 	})
 }
 
-// Handler with request parsing and response formatting
+// Handler with request parsing and response validation
+// This demonstrates the complete flow: parse request -> validate request -> execute handler -> validate response
 func (h *AuthHandler) Register(c *fiber.Ctx, req *RegisterRequest) (interface{}, error) {
 	// req is automatically parsed and validated
-	// return data and error for automatic response formatting
+	// return data and error for automatic response formatting and validation
 	return UserResponse{
 		ID:        1,
 		Email:     req.Email,
@@ -114,6 +130,25 @@ func (h *AuthHandler) Register(c *fiber.Ctx, req *RegisterRequest) (interface{},
 		IsActive:  true,
 		OrgID:     1,
 		CreatedAt: time.Now(),
+	}, nil
+}
+
+// Handler with request parsing and response validation
+func (h *AuthHandler) LoginWithValidation(c *fiber.Ctx, req *LoginRequest) (interface{}, error) {
+	// req is automatically parsed and validated
+	// return data and error for automatic response formatting and validation
+	return LoginResponse{
+		Token: "jwt_token_here",
+		User: UserResponse{
+			ID:        1,
+			Email:     req.Email,
+			Name:      "Example User",
+			Role:      "user",
+			IsActive:  true,
+			OrgID:     1,
+			CreatedAt: time.Now(),
+		},
+		ExpiresAt: time.Now().Add(24 * time.Hour),
 	}, nil
 }
 
@@ -157,8 +192,13 @@ func (h *AuthHandler) ListUsers(c *fiber.Ctx, req *UserFilterRequest) (interface
 	}, nil
 }
 
-// GetUser demonstrates smart parsing (auto-detect source based on HTTP method)
+// GetUser demonstrates smart parsing (auto-detect source) with response validation
 func (h *AuthHandler) GetUser(c *fiber.Ctx, req *GetUserRequest) (interface{}, error) {
+	// Simulate user not found
+	if req.UserID == 999 {
+		return nil, fiber.NewError(fiber.StatusNotFound, "User not found")
+	}
+
 	return UserResponse{
 		ID:        req.UserID,
 		Email:     "user@example.com",
@@ -170,7 +210,7 @@ func (h *AuthHandler) GetUser(c *fiber.Ctx, req *GetUserRequest) (interface{}, e
 	}, nil
 }
 
-// CreateUser demonstrates parsing from path, query, headers, and body
+// CreateUser demonstrates parsing from path, query, headers, and body with response validation
 func (h *AuthHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
 	return UserResponse{
 		ID:        1,
@@ -228,14 +268,36 @@ func (h *UserHandler) CreateUserFromMap(c *fiber.Ctx) (interface{}, error) {
 	}, nil
 }
 
+// Custom validation function for strong password
+func validateStrongPassword(fl validator.FieldLevel) bool {
+	password := fl.Field().String()
+
+	// Check if password contains at least one uppercase letter, one lowercase letter, and one number
+	hasUpper := false
+	hasLower := false
+	hasNumber := false
+
+	for _, char := range password {
+		if char >= 'A' && char <= 'Z' {
+			hasUpper = true
+		} else if char >= 'a' && char <= 'z' {
+			hasLower = true
+		} else if char >= '0' && char <= '9' {
+			hasNumber = true
+		}
+	}
+
+	return hasUpper && hasLower && hasNumber
+}
+
 func main() {
 	// Create AutoFiber app with docs configuration
 	app := autofiber.New(fiber.Config{
 		EnablePrintRoutes: true,
 	}).
 		WithDocsInfo(autofiber.OpenAPIInfo{
-			Title:       "AutoFiber Parse Tag Example",
-			Description: "Demonstrating parse tag for field source specification",
+			Title:       "AutoFiber Complete Flow Example",
+			Description: "Demonstrating complete flow: parse request -> validate request -> execute handler -> validate response",
 			Version:     "1.0.0",
 			Contact: &autofiber.OpenAPIContact{
 				Name:  "AutoFiber Team",
@@ -247,6 +309,10 @@ func main() {
 			Description: "Development server",
 		})
 
+	// Add custom validator with custom validation rules
+	validator := autofiber.GetValidator()
+	validator.RegisterValidation("strong_password", validateStrongPassword)
+
 	// Add Fiber logger middleware
 	app.Use(logger.New())
 
@@ -255,7 +321,15 @@ func main() {
 	// Register routes with auto-parse and documentation
 	app.Post("/login", handler.Login,
 		autofiber.WithRequestSchema(LoginRequest{}),
-		autofiber.WithDescription("Authenticate user and return JWT token"),
+		autofiber.WithDescription("Authenticate user and return JWT token (no response validation)"),
+		autofiber.WithTags("auth", "authentication"),
+	)
+
+	// Route with complete flow: parse request -> validate request -> execute handler -> validate response
+	app.Post("/login-with-validation", handler.LoginWithValidation,
+		autofiber.WithRequestSchema(LoginRequest{}),
+		autofiber.WithResponseSchema(LoginResponse{}),
+		autofiber.WithDescription("Authenticate user with response validation (complete flow demonstration)"),
 		autofiber.WithTags("auth", "authentication"),
 	)
 
@@ -273,19 +347,19 @@ func main() {
 		autofiber.WithTags("user", "admin"),
 	)
 
-	// Route with smart parsing (auto-detect source based on HTTP method)
+	// Route with smart parsing (auto-detect source) and response validation
 	app.Get("/users/:user_id", handler.GetUser,
 		autofiber.WithRequestSchema(GetUserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
-		autofiber.WithDescription("Get user by ID with smart parsing (auto-detect path/query/body)"),
+		autofiber.WithDescription("Get user by ID with smart parsing and response validation"),
 		autofiber.WithTags("user", "admin"),
 	)
 
-	// Route with path parameter, query parameters, headers, and body using parse tag
+	// Route with path parameter, query parameters, headers, and body using parse tag with response validation
 	app.Post("/organizations/:org_id/users", handler.CreateUser,
 		autofiber.WithRequestSchema(CreateUserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
-		autofiber.WithDescription("Create a new user in an organization (with response validation)"),
+		autofiber.WithDescription("Create a new user in an organization (complete flow with response validation)"),
 		autofiber.WithTags("user", "admin"),
 	)
 
@@ -300,5 +374,13 @@ func main() {
 
 	// Start server with log
 	log.Println("Server is running at http://localhost:3000")
+	log.Println("API Documentation: http://localhost:3000/docs")
+	log.Println("Swagger UI: http://localhost:3000/swagger")
+	log.Println("")
+	log.Println("Complete Flow Examples:")
+	log.Println("- POST /register: Parse request -> Validate request -> Execute handler -> Validate response")
+	log.Println("- POST /login-with-validation: Same complete flow with login response")
+	log.Println("- GET /users/:user_id: Smart parsing with response validation")
+	log.Println("- POST /organizations/:org_id/users: Multi-source parsing with response validation")
 	app.Listen(":3000")
 }

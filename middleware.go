@@ -7,12 +7,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// Simple wraps a simple handler
+// Simple wraps a simple handler function
 func Simple(handler func(*fiber.Ctx) error) fiber.Handler {
 	return handler
 }
 
-// AutoParseRequest creates middleware for auto-parsing request from multiple sources
+// AutoParseRequest returns middleware for automatic request parsing and validation
 func AutoParseRequest(schema interface{}, customValidator *validator.Validate) fiber.Handler {
 	if customValidator == nil {
 		customValidator = GetValidator()
@@ -27,48 +27,18 @@ func AutoParseRequest(schema interface{}, customValidator *validator.Validate) f
 
 		req := reflect.New(schemaType).Interface()
 
-		// Parse from different sources based on struct tags and HTTP method
+		// Parse from multiple sources based on struct tags and HTTP method
 		if err := parseFromMultipleSources(c, req); err != nil {
-			if _, ok := err.(*ParseError); ok {
-				return err
-				//return c.Status(400).JSON(fiber.Map{
-				//	"error":   "Invalid request",
-				//	"details": err.Error(),
-				//})
-			}
-			// fallback: unknown error
 			return err
-			//return c.Status(400).JSON(fiber.Map{
-			//	"error":   "Invalid request",
-			//	"details": err.Error(),
-			//})
 		}
 
 		// Validate the request
 		if err := customValidator.Struct(req); err != nil {
 			return err
-			//return c.Status(422).JSON(fiber.Map{
-			//	"error":   "Validation failed",
-			//	"details": err.Error(),
-			//})
 		}
 
 		// Store parsed request in context
 		c.Locals("parsed_request", req)
-		return nil
-	}
-}
-
-// ValidateResponse creates middleware for response validation
-func ValidateResponse(schema interface{}, customValidator *validator.Validate) fiber.Handler {
-	if customValidator == nil {
-		customValidator = GetValidator()
-	}
-
-	return func(c *fiber.Ctx) error {
-		// Store validation info in context
-		c.Locals("response_schema", schema)
-		c.Locals("response_validator", customValidator)
 		return nil
 	}
 }
@@ -87,7 +57,7 @@ func ValidateAndJSON(c *fiber.Ctx, data interface{}) error {
 	if v, ok := validatorInstance.(*validator.Validate); ok {
 		// Validate response data
 		if err := validateResponseData(data, schema, v); err != nil {
-			return c.Status(500).JSON(fiber.Map{
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error":   "Response validation failed",
 				"details": err.Error(),
 			})
