@@ -1,3 +1,4 @@
+// Package autofiber provides OpenAPI/Swagger documentation configuration and serving utilities.
 package autofiber
 
 import (
@@ -6,25 +7,29 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// WithDocsInfo sets the API documentation information
+// WithDocsInfo sets the API documentation information including title, version, and description.
+// This information will be used in the generated OpenAPI specification.
 func (af *AutoFiber) WithDocsInfo(info OpenAPIInfo) *AutoFiber {
 	af.docsInfo = &info
 	return af
 }
 
-// WithDocsServer adds a server to the documentation
+// WithDocsServer adds a server configuration to the documentation.
+// Multiple servers can be added for different environments (dev, staging, prod).
 func (af *AutoFiber) WithDocsServer(server OpenAPIServer) *AutoFiber {
 	af.docsServers = append(af.docsServers, server)
 	return af
 }
 
-// WithDocsBasePath sets the base path for documentation
+// WithDocsBasePath sets the base path for the API documentation.
+// This affects the URL structure in the generated OpenAPI specification.
 func (af *AutoFiber) WithDocsBasePath(basePath string) *AutoFiber {
 	af.docsGenerator = NewDocsGenerator(basePath)
 	return af
 }
 
-// GetOpenAPISpec returns the OpenAPI specification
+// GetOpenAPISpec returns the complete OpenAPI specification as a struct.
+// If no documentation info is set, it uses default values.
 func (af *AutoFiber) GetOpenAPISpec() *OpenAPISpec {
 	if af.docsInfo == nil {
 		af.docsInfo = &OpenAPIInfo{
@@ -41,7 +46,8 @@ func (af *AutoFiber) GetOpenAPISpec() *OpenAPISpec {
 	return af.docsGenerator.GenerateOpenAPISpec(*af.docsInfo)
 }
 
-// GetOpenAPIJSON returns the OpenAPI specification as JSON
+// GetOpenAPIJSON returns the OpenAPI specification as JSON bytes.
+// This is useful for serving the specification via HTTP or saving to a file.
 func (af *AutoFiber) GetOpenAPIJSON() ([]byte, error) {
 	if af.docsInfo == nil {
 		af.docsInfo = &OpenAPIInfo{
@@ -58,7 +64,8 @@ func (af *AutoFiber) GetOpenAPIJSON() ([]byte, error) {
 	return af.docsGenerator.GenerateJSON(*af.docsInfo)
 }
 
-// ServeDocs serves the OpenAPI documentation at the specified path
+// ServeDocs serves the OpenAPI specification as JSON at the specified path.
+// This creates a GET route that returns the OpenAPI specification.
 func (af *AutoFiber) ServeDocs(path string) {
 	af.Get(path, func(c *fiber.Ctx) error {
 		jsonData, err := af.GetOpenAPIJSON()
@@ -70,7 +77,10 @@ func (af *AutoFiber) ServeDocs(path string) {
 	})
 }
 
-// ServeSwaggerUI serves Swagger UI for the OpenAPI documentation
+// ServeSwaggerUI serves Swagger UI for the OpenAPI documentation.
+// This creates a GET route that serves an HTML page with Swagger UI interface.
+// swaggerPath is the URL path where Swagger UI will be served.
+// docsPath is the URL path where the OpenAPI JSON specification is served.
 func (af *AutoFiber) ServeSwaggerUI(swaggerPath, docsPath string) {
 	// Serve Swagger UI HTML
 	swaggerHTML := fmt.Sprintf(`

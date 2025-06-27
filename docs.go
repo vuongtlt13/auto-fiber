@@ -1,3 +1,4 @@
+// Package autofiber provides OpenAPI 3.0 specification generation for automatic API documentation.
 package autofiber
 
 import (
@@ -8,7 +9,7 @@ import (
 	"time"
 )
 
-// OpenAPISpec represents the OpenAPI 3.0 specification
+// OpenAPISpec represents the OpenAPI 3.0 specification structure.
 type OpenAPISpec struct {
 	OpenAPI    string                 `json:"openapi"`
 	Info       OpenAPIInfo            `json:"info"`
@@ -18,7 +19,7 @@ type OpenAPISpec struct {
 	Tags       []OpenAPITag           `json:"tags,omitempty"`
 }
 
-// OpenAPIInfo represents the API information
+// OpenAPIInfo represents the API information including title, description, version, and contact details.
 type OpenAPIInfo struct {
 	Title       string          `json:"title"`
 	Description string          `json:"description,omitempty"`
@@ -27,26 +28,26 @@ type OpenAPIInfo struct {
 	License     *OpenAPILicense `json:"license,omitempty"`
 }
 
-// OpenAPIContact represents contact information
+// OpenAPIContact represents contact information for the API.
 type OpenAPIContact struct {
 	Name  string `json:"name,omitempty"`
 	URL   string `json:"url,omitempty"`
 	Email string `json:"email,omitempty"`
 }
 
-// OpenAPILicense represents license information
+// OpenAPILicense represents license information for the API.
 type OpenAPILicense struct {
 	Name string `json:"name"`
 	URL  string `json:"url,omitempty"`
 }
 
-// OpenAPIServer represents server information
+// OpenAPIServer represents server information for the API.
 type OpenAPIServer struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 }
 
-// OpenAPIPath represents a path in the API
+// OpenAPIPath represents a path in the API with all supported HTTP methods.
 type OpenAPIPath struct {
 	Get     *OpenAPIOperation `json:"get,omitempty"`
 	Post    *OpenAPIOperation `json:"post,omitempty"`
@@ -57,7 +58,7 @@ type OpenAPIPath struct {
 	Options *OpenAPIOperation `json:"options,omitempty"`
 }
 
-// OpenAPIOperation represents an API operation
+// OpenAPIOperation represents an API operation with parameters, request body, and responses.
 type OpenAPIOperation struct {
 	Tags        []string                   `json:"tags,omitempty"`
 	Summary     string                     `json:"summary,omitempty"`
@@ -69,7 +70,7 @@ type OpenAPIOperation struct {
 	Security    []map[string][]string      `json:"security,omitempty"`
 }
 
-// OpenAPIParameter represents a parameter
+// OpenAPIParameter represents a parameter (query, path, header, cookie) for an API operation.
 type OpenAPIParameter struct {
 	Name        string         `json:"name"`
 	In          string         `json:"in"`
@@ -78,25 +79,25 @@ type OpenAPIParameter struct {
 	Schema      *OpenAPISchema `json:"schema,omitempty"`
 }
 
-// OpenAPIRequestBody represents a request body
+// OpenAPIRequestBody represents a request body for an API operation.
 type OpenAPIRequestBody struct {
 	Description string                      `json:"description,omitempty"`
 	Required    bool                        `json:"required,omitempty"`
 	Content     map[string]OpenAPIMediaType `json:"content"`
 }
 
-// OpenAPIMediaType represents media type content
+// OpenAPIMediaType represents media type content (e.g., application/json).
 type OpenAPIMediaType struct {
 	Schema *OpenAPISchema `json:"schema,omitempty"`
 }
 
-// OpenAPIResponse represents a response
+// OpenAPIResponse represents a response for an API operation.
 type OpenAPIResponse struct {
 	Description string                      `json:"description"`
 	Content     map[string]OpenAPIMediaType `json:"content,omitempty"`
 }
 
-// OpenAPISchema represents a schema
+// OpenAPISchema represents a JSON schema for request/response data structures.
 type OpenAPISchema struct {
 	Type        string                   `json:"type,omitempty"`
 	Format      string                   `json:"format,omitempty"`
@@ -108,19 +109,19 @@ type OpenAPISchema struct {
 	Example     interface{}              `json:"example,omitempty"`
 }
 
-// OpenAPIComponents represents reusable components
+// OpenAPIComponents represents reusable components like schemas and security schemes.
 type OpenAPIComponents struct {
 	Schemas         map[string]OpenAPISchema     `json:"schemas,omitempty"`
 	SecuritySchemes map[string]map[string]string `json:"securitySchemes,omitempty"`
 }
 
-// OpenAPITag represents a tag
+// OpenAPITag represents a tag for grouping API operations.
 type OpenAPITag struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
 
-// RouteInfo stores information about a route for documentation
+// RouteInfo stores information about a route for documentation generation.
 type RouteInfo struct {
 	Path        string
 	Method      string
@@ -129,7 +130,7 @@ type RouteInfo struct {
 	OperationID string
 }
 
-// DocsGenerator handles API documentation generation
+// DocsGenerator handles API documentation generation and OpenAPI specification creation.
 type DocsGenerator struct {
 	routes   []RouteInfo
 	schemas  map[string]OpenAPISchema
@@ -137,7 +138,7 @@ type DocsGenerator struct {
 	basePath string
 }
 
-// NewDocsGenerator creates a new documentation generator
+// NewDocsGenerator creates a new documentation generator with the specified base path.
 func NewDocsGenerator(basePath string) *DocsGenerator {
 	return &DocsGenerator{
 		routes:   []RouteInfo{},
@@ -147,7 +148,7 @@ func NewDocsGenerator(basePath string) *DocsGenerator {
 	}
 }
 
-// AddRoute adds a route to the documentation generator
+// AddRoute adds a route to the documentation generator with its metadata and options.
 func (dg *DocsGenerator) AddRoute(path, method string, handler interface{}, options *RouteOptions) {
 	operationID := generateOperationID(method, path, handler)
 
@@ -177,7 +178,7 @@ func (dg *DocsGenerator) AddRoute(path, method string, handler interface{}, opti
 	}
 }
 
-// GenerateOpenAPISpec generates the OpenAPI specification
+// GenerateOpenAPISpec generates the complete OpenAPI specification from collected route information.
 func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
 	spec := &OpenAPISpec{
 		OpenAPI: "3.0.0",
@@ -221,13 +222,15 @@ func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
 	return spec
 }
 
-// GenerateJSON generates the OpenAPI specification as JSON
+// GenerateJSON generates the OpenAPI specification as JSON bytes.
+// This is useful for serving the specification via HTTP or saving to a file.
 func (dg *DocsGenerator) GenerateJSON(info OpenAPIInfo) ([]byte, error) {
 	spec := dg.GenerateOpenAPISpec(info)
 	return json.MarshalIndent(spec, "", "  ")
 }
 
-// generatePath generates a path operation from route info
+// generatePathWithSecurity generates a path operation from route info with security considerations.
+// It returns the OpenAPIPath and a boolean indicating if bearer authentication is required.
 func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath, bool) {
 	operation := &OpenAPIOperation{
 		Tags:        route.Options.Tags,
@@ -273,7 +276,9 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 	return path, hasBearer
 }
 
-// generateParametersAndBody generates parameters and request body from parse tags
+// generateParametersAndBodyWithSecurity generates parameters and request body from parse tags with security handling.
+// It analyzes struct fields and their parse tags to determine parameter sources (query, path, header, cookie, body).
+// Returns parameters, request body, and a boolean indicating if bearer authentication is required.
 func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{}, path string) ([]OpenAPIParameter, *OpenAPIRequestBody, bool) {
 	var parameters []OpenAPIParameter
 	var bodyFields []string
@@ -443,7 +448,8 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 	return parameters, requestBody, needsBearer
 }
 
-// generatePathParameters generates parameters for path variables
+// generatePathParameters generates parameters for path variables from the URL path.
+// It extracts parameters like /users/:id and creates OpenAPI parameter definitions.
 func (dg *DocsGenerator) generatePathParameters(path string) []OpenAPIParameter {
 	var params []OpenAPIParameter
 
@@ -468,7 +474,8 @@ func (dg *DocsGenerator) generatePathParameters(path string) []OpenAPIParameter 
 	return params
 }
 
-// generateRequestBody generates request body from schema (legacy method)
+// generateRequestBody generates request body from schema (legacy method).
+// This method creates a request body that references a schema component.
 func (dg *DocsGenerator) generateRequestBody(schema interface{}) *OpenAPIRequestBody {
 	schemaName := getSchemaName(schema)
 
@@ -484,7 +491,8 @@ func (dg *DocsGenerator) generateRequestBody(schema interface{}) *OpenAPIRequest
 	}
 }
 
-// generateResponses generates responses for the operation
+// generateResponses generates responses for the operation including success and error responses.
+// It creates standard 200, 400, and 500 responses with appropriate schemas.
 func (dg *DocsGenerator) generateResponses(route RouteInfo) map[string]OpenAPIResponse {
 	responses := make(map[string]OpenAPIResponse)
 
@@ -540,14 +548,16 @@ func (dg *DocsGenerator) generateResponses(route RouteInfo) map[string]OpenAPIRe
 	return responses
 }
 
-// addSchema adds a schema to the components
+// addSchema adds a schema to the components section of the OpenAPI specification.
+// It converts the Go struct to an OpenAPI schema and stores it for reference.
 func (dg *DocsGenerator) addSchema(schema interface{}) {
 	schemaName := getSchemaName(schema)
 	openAPISchema := dg.convertToOpenAPISchema(schema)
 	dg.schemas[schemaName] = openAPISchema
 }
 
-// convertToOpenAPISchema converts a Go struct to OpenAPI schema
+// convertToOpenAPISchema converts a Go struct to OpenAPI schema.
+// It analyzes struct fields, their types, tags, and validation rules to create a complete schema.
 func (dg *DocsGenerator) convertToOpenAPISchema(schema interface{}) OpenAPISchema {
 	t := reflect.TypeOf(schema)
 	if t.Kind() == reflect.Ptr {
@@ -606,7 +616,8 @@ func (dg *DocsGenerator) convertToOpenAPISchema(schema interface{}) OpenAPISchem
 	return openAPISchema
 }
 
-// convertFieldTypeToSchema converts a Go type to OpenAPI schema
+// convertFieldTypeToSchema converts a Go type to OpenAPI schema.
+// It handles basic types, structs, slices, arrays, and pointers with appropriate OpenAPI types.
 func (dg *DocsGenerator) convertFieldTypeToSchema(t reflect.Type) OpenAPISchema {
 	switch t.Kind() {
 	case reflect.String:
@@ -640,7 +651,7 @@ func (dg *DocsGenerator) convertFieldTypeToSchema(t reflect.Type) OpenAPISchema 
 	}
 }
 
-// getTagsList returns the list of tags
+// getTagsList returns the list of tags as a slice for the OpenAPI specification.
 func (dg *DocsGenerator) getTagsList() []OpenAPITag {
 	var tags []OpenAPITag
 	for _, tag := range dg.tags {
@@ -649,7 +660,8 @@ func (dg *DocsGenerator) getTagsList() []OpenAPITag {
 	return tags
 }
 
-// generateOperationID generates a unique operation ID
+// generateOperationID generates a unique operation ID for the OpenAPI specification.
+// It combines the HTTP method, path, and handler information to create a unique identifier.
 func generateOperationID(method, path string, handler interface{}) string {
 	handlerName := reflect.TypeOf(handler).String()
 	handlerName = strings.TrimPrefix(handlerName, "func(")
@@ -663,7 +675,8 @@ func generateOperationID(method, path string, handler interface{}) string {
 	return fmt.Sprintf("%s_%s_%s", strings.ToLower(method), cleanPath, handlerName)
 }
 
-// getSchemaName gets the name of a schema
+// getSchemaName gets the name of a schema from its Go type.
+// It handles pointer types and returns the underlying type name.
 func getSchemaName(schema interface{}) string {
 	t := reflect.TypeOf(schema)
 	if t.Kind() == reflect.Ptr {
@@ -672,7 +685,8 @@ func getSchemaName(schema interface{}) string {
 	return t.Name()
 }
 
-// WithDocsInfo sets documentation information for the API
+// WithDocsInfo sets documentation information for the API.
+// This is a global option that affects the entire API documentation.
 func WithDocsInfo(info OpenAPIInfo) RouteOption {
 	return func(opts *RouteOptions) {
 		// This is a global option, not per-route
@@ -680,7 +694,8 @@ func WithDocsInfo(info OpenAPIInfo) RouteOption {
 	}
 }
 
-// WithDocsServer adds a server to the documentation
+// WithDocsServer adds a server to the documentation.
+// This is a global option that affects the entire API documentation.
 func WithDocsServer(server OpenAPIServer) RouteOption {
 	return func(opts *RouteOptions) {
 		// This is a global option, not per-route

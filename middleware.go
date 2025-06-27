@@ -1,3 +1,4 @@
+// Package autofiber provides middleware functions for automatic request parsing, validation, and response handling.
 package autofiber
 
 import (
@@ -7,12 +8,16 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// Simple wraps a simple handler function
+// Simple wraps a simple handler function.
+// This is a utility function for creating Fiber handlers from simple functions.
 func Simple(handler func(*fiber.Ctx) error) fiber.Handler {
 	return handler
 }
 
-// AutoParseRequest returns middleware for automatic request parsing and validation
+// AutoParseRequest returns middleware for automatic request parsing and validation.
+// The middleware parses request data from multiple sources (body, query, path, headers, cookies, form)
+// based on struct tags and validates the parsed data using the provided schema.
+// If customValidator is nil, it uses the global validator instance.
 func AutoParseRequest(schema interface{}, customValidator *validator.Validate) fiber.Handler {
 	if customValidator == nil {
 		customValidator = GetValidator()
@@ -43,7 +48,10 @@ func AutoParseRequest(schema interface{}, customValidator *validator.Validate) f
 	}
 }
 
-// ValidateAndJSON validates response data and returns JSON
+// ValidateAndJSON validates response data and returns JSON.
+// If response validation is configured, it validates the data against the response schema
+// before returning the JSON response. If validation fails, it returns an error response.
+// If no validation is configured, it simply returns the JSON response.
 func ValidateAndJSON(c *fiber.Ctx, data interface{}) error {
 	schema := c.Locals("response_schema")
 	validatorInstance := c.Locals("response_validator")
@@ -67,7 +75,9 @@ func ValidateAndJSON(c *fiber.Ctx, data interface{}) error {
 	return c.JSON(data)
 }
 
-// GetParsedRequest retrieves the parsed request from context
+// GetParsedRequest retrieves the parsed request from context.
+// This function extracts the parsed request data that was stored by AutoParseRequest middleware.
+// It returns nil if no parsed request is found or if the type assertion fails.
 func GetParsedRequest[T any](c *fiber.Ctx) *T {
 	if req, ok := c.Locals("parsed_request").(*T); ok {
 		return req

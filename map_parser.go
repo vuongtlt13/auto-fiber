@@ -1,3 +1,4 @@
+// Package autofiber provides map and interface parsing utilities for converting data structures to Go structs.
 package autofiber
 
 import (
@@ -6,17 +7,23 @@ import (
 	"strings"
 )
 
-// ParseFromMap parses a struct from a map[string]interface{}
+// ParseFromMap parses a struct from a map[string]interface{}.
+// It uses JSON tags to map keys to struct fields and sets the values accordingly.
+// The schema parameter must be a pointer to the target struct.
 func ParseFromMap(data map[string]interface{}, schema interface{}) error {
 	return parseFromMapInternal(data, schema)
 }
 
-// ParseFromInterface parses a struct from any interface{} (map, struct, etc.)
+// ParseFromInterface parses a struct from any interface{} (map, struct, etc.).
+// It supports map[string]interface{}, map[string]string, and struct types.
+// The schema parameter must be a pointer to the target struct.
 func ParseFromInterface(data interface{}, schema interface{}) error {
 	return parseFromInterfaceInternal(data, schema)
 }
 
-// parseFromMapInternal parses a struct from a map[string]interface{}
+// parseFromMapInternal parses a struct from a map[string]interface{}.
+// It iterates through struct fields, looks up values in the map using JSON tags,
+// and sets the field values with appropriate type conversion.
 func parseFromMapInternal(data map[string]interface{}, schema interface{}) error {
 	reqValue := reflect.ValueOf(schema)
 	if reqValue.Kind() != reflect.Ptr {
@@ -44,7 +51,9 @@ func parseFromMapInternal(data map[string]interface{}, schema interface{}) error
 	return nil
 }
 
-// parseFromInterfaceInternal parses a struct from any interface{} (map, struct, etc.)
+// parseFromInterfaceInternal parses a struct from any interface{} (map, struct, etc.).
+// It handles different data types by converting them to a common format and then parsing.
+// Supported types include map[string]interface{}, map[string]string, and structs.
 func parseFromInterfaceInternal(data interface{}, schema interface{}) error {
 	// Handle map[string]interface{}
 	if mapData, ok := data.(map[string]interface{}); ok {
@@ -74,7 +83,9 @@ func parseFromInterfaceInternal(data interface{}, schema interface{}) error {
 	return fmt.Errorf("unsupported data type: %T", data)
 }
 
-// parseFromStruct parses from one struct to another
+// parseFromStruct parses from one struct to another.
+// It converts the source struct to a map using JSON tags and then parses into the target struct.
+// This is useful for copying data between structs with different field names or types.
 func parseFromStruct(data interface{}, schema interface{}) error {
 	dataValue := reflect.ValueOf(data)
 	if dataValue.Kind() == reflect.Ptr {
@@ -101,7 +112,9 @@ func parseFromStruct(data interface{}, schema interface{}) error {
 	return parseFromMapInternal(dataMap, schema)
 }
 
-// getFieldKey gets the key name for a field from json tag or field name
+// getFieldKey gets the key name for a field from json tag or field name.
+// If a JSON tag is present and not "-", it uses the first part of the tag.
+// Otherwise, it uses the field name.
 func getFieldKey(field reflect.StructField) string {
 	if jsonTag := field.Tag.Get("json"); jsonTag != "" && jsonTag != "-" {
 		jsonParts := strings.Split(jsonTag, ",")

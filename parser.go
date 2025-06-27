@@ -1,3 +1,4 @@
+// Package autofiber provides request parsing utilities for extracting and validating data from multiple sources.
 package autofiber
 
 import (
@@ -8,7 +9,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// parseFromMultipleSources parses request from multiple sources based on struct tags
+// parseFromMultipleSources parses request data from multiple sources (body, query, path, header, cookie, form)
+// based on struct tags and HTTP method. It fills the req struct with parsed values and returns an error if parsing fails.
 func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 	reqValue := reflect.ValueOf(req).Elem()
 	reqType := reqValue.Type()
@@ -44,7 +46,8 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 	return nil
 }
 
-// getFieldInfo extracts parsing information from struct tags with smart defaults
+// getFieldInfo extracts parsing information from struct tags with smart defaults.
+// It returns a FieldInfo struct describing how to parse the field.
 func getFieldInfo(field reflect.StructField, httpMethod string) *FieldInfo {
 	// Check for parse tag first (highest priority)
 	if parseTag := field.Tag.Get("parse"); parseTag != "" {
@@ -74,7 +77,8 @@ func getFieldInfo(field reflect.StructField, httpMethod string) *FieldInfo {
 	}
 }
 
-// getSmartSource determines the best source based on HTTP method
+// getSmartSource determines the best source for a field based on HTTP method.
+// For GET: path → query → body; for POST/PUT/PATCH: body → path → query; for DELETE: path → query.
 func getSmartSource(httpMethod string) ParseSource {
 	switch strings.ToUpper(httpMethod) {
 	case "GET":
@@ -91,9 +95,9 @@ func getSmartSource(httpMethod string) ParseSource {
 	}
 }
 
-// parseParseTag parses the "parse" tag for complex parsing rules
+// parseParseTag parses the "parse" struct tag for complex parsing rules.
+// The tag format is: parse:"source:key,required,default:value"
 func parseParseTag(parseTag string, field reflect.StructField) *FieldInfo {
-	// Format: parse:"source:key,required,default:value"
 	parts := strings.Split(parseTag, ",")
 
 	sourcePart := parts[0]
@@ -132,7 +136,7 @@ func parseParseTag(parseTag string, field reflect.StructField) *FieldInfo {
 	}
 }
 
-// convertDefaultValue converts string default value to appropriate type
+// convertDefaultValue converts a string default value to the appropriate Go type based on fieldType.
 func convertDefaultValue(defaultStr string, fieldType reflect.Type) interface{} {
 	switch fieldType.Kind() {
 	case reflect.String:
@@ -151,7 +155,8 @@ func convertDefaultValue(defaultStr string, fieldType reflect.Type) interface{} 
 	return defaultStr
 }
 
-// parseFieldFromSource parses a single field from its specified source
+// parseFieldFromSource parses a single field from its specified source (query, path, header, etc.)
+// and sets the value in the struct. Handles required and default values.
 func parseFieldFromSource(c *fiber.Ctx, fieldInfo *FieldInfo, fieldValue reflect.Value) error {
 	var value interface{}
 
@@ -214,7 +219,7 @@ func parseFieldFromSource(c *fiber.Ctx, fieldInfo *FieldInfo, fieldValue reflect
 	return nil
 }
 
-// setFieldValue sets a field value with type conversion
+// setFieldValue sets a struct field value with type conversion from string or interface{}.
 func setFieldValue(field reflect.Value, value interface{}) error {
 	switch field.Kind() {
 	case reflect.String:
@@ -244,11 +249,12 @@ func setFieldValue(field reflect.Value, value interface{}) error {
 	return nil
 }
 
-// Helper functions for parsing
+// parseInt parses a string as an int.
 func parseInt(s string) (int, error) {
 	return strconv.Atoi(s)
 }
 
+// parseFloat parses a string as a float64.
 func parseFloat(s string) (float64, error) {
 	return strconv.ParseFloat(s, 64)
 }

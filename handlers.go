@@ -1,3 +1,4 @@
+// Package autofiber provides handler creation utilities for automatic request parsing, validation, and response handling.
 package autofiber
 
 import (
@@ -6,7 +7,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// createHandlerWithOptions returns a handler with the given options
+// createHandlerWithOptions returns a handler with the given options.
+// It determines the appropriate handler type based on whether a request schema is provided.
+// If no request schema is provided, it returns a simple handler. Otherwise, it creates an auto-parse handler.
 func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOptions) fiber.Handler {
 	if opts.RequestSchema == nil {
 		if simpleHandler, ok := handler.(func(*fiber.Ctx) error); ok {
@@ -20,7 +23,9 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 	return af.createAutoParseHandler(handler, opts)
 }
 
-// createAutoParseHandler returns an auto-parse handler based on the request schema
+// createAutoParseHandler returns an auto-parse handler based on the request schema.
+// It analyzes the schema type and creates the appropriate handler for struct-based schemas.
+// For non-struct schemas, it falls back to a simple handler.
 func (af *AutoFiber) createAutoParseHandler(handler interface{}, opts *RouteOptions) fiber.Handler {
 	reqType := reflect.TypeOf(opts.RequestSchema)
 
@@ -41,7 +46,11 @@ func (af *AutoFiber) createAutoParseHandler(handler interface{}, opts *RouteOpti
 	return handler.(fiber.Handler)
 }
 
-// createStructHandler returns a handler for struct-based request schemas
+// createStructHandler returns a handler for struct-based request schemas.
+// It supports two handler signatures:
+// 1. func(c *fiber.Ctx, req *SchemaType) (interface{}, error) - returns data and error
+// 2. func(c *fiber.Ctx, req *SchemaType) error - legacy signature, returns only error
+// The handler automatically applies request parsing, validation, and response validation.
 func (af *AutoFiber) createStructHandler(handler interface{}, opts *RouteOptions) fiber.Handler {
 	// Try to match handler signature with request schema
 	handlerType := reflect.TypeOf(handler)

@@ -1,3 +1,4 @@
+// Package autofiber provides response validation utilities for ensuring API responses match expected schemas.
 package autofiber
 
 import (
@@ -7,7 +8,9 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// validateResponseData validates response data against schema
+// validateResponseData validates response data against the provided schema using the given validator.
+// It supports validating structs, pointers to structs, and slices of structs. If the schema is nil, validation is skipped.
+// Returns an error if validation fails, or nil if the data is valid.
 func validateResponseData(data interface{}, schema interface{}, validator *validator.Validate) error {
 	// If schema is nil, skip validation
 	if schema == nil {
