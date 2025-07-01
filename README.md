@@ -39,15 +39,15 @@ auto-fiber/
   docs/             // Documentation and guides
 ```
 
-- **app.go**: Khởi tạo app, đăng ký route, group, listen.
-- **group.go**: Hỗ trợ group route, middleware cho group.
-- **handlers.go**: Tạo handler đúng signature, kiểm tra lỗi signature.
-- **parser.go**: Tự động parse request từ nhiều nguồn (body, query, path, header, cookie).
-- **validator.go**: Validate response trước khi trả về client.
-- **map_parser.go**: Hỗ trợ parse struct từ map/interface (phục vụ test, mock, ...).
-- **docs.go**: Sinh OpenAPI spec, serve Swagger UI/docs.
-- **options.go**: Các hàm option cho route (schema, tags, description, ...).
-- **types.go**: Định nghĩa các type core, RouteOptions, ParseSource, ...
+- **app.go**: Initialize app, register routes, groups, listen.
+- **group.go**: Support for route groups, group middleware.
+- **handlers.go**: Create handlers with correct signature, signature validation.
+- **parser.go**: Automatically parse requests from multiple sources (body, query, path, header, cookie).
+- **validator.go**: Validate response before returning to client.
+- **map_parser.go**: Support parsing struct from map/interface (for test, mock, ...).
+- **docs.go**: Generate OpenAPI spec, serve Swagger UI/docs.
+- **options.go**: Option functions for routes (schema, tags, description, ...).
+- **types.go**: Define core types, RouteOptions, ParseSource, ...
 
 ## Quick Start
 
@@ -56,12 +56,12 @@ package main
 
 import (
     "time"
-    "github.com/vuongtlt13/auto-fiber"
     "github.com/gofiber/fiber/v2"
+    autofiber "github.com/vuongtlt13/auto-fiber"
 )
 
 // Request schema with parse tag
-// (parse từ path, query, header, body)
+// (parse from path, query, header, body)
 type CreateUserRequest struct {
     OrgID    int    `parse:"path:org_id" validate:"required"`
     Role     string `parse:"query:role" validate:"required,oneof=admin user"`
@@ -98,7 +98,7 @@ func main() {
         autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
             Title:       "AutoFiber API",
             Description: "A sample API with complete request/response flow",
-            Version:     "1.0.0",
+            Version:     "0.3.1",
         }),
     )
 
@@ -116,6 +116,22 @@ func main() {
     app.Listen(":3000")
 }
 ```
+
+## Complete Request/Response Flow
+
+AutoFiber provides a complete flow similar to FastAPI:
+
+```
+Parse Request → Validate Request → Execute Handler → Validate Response → Return JSON
+```
+
+### Flow Details
+
+1. **Parse Request**: Automatically parse from multiple sources (body, query, path, headers, cookies)
+2. **Validate Request**: Validate parsed data against struct tags
+3. **Execute Handler**: Run your business logic
+4. **Validate Response**: Validate response data before sending
+5. **Return JSON**: Send validated response to client
 
 ## Handler Signatures
 
@@ -145,22 +161,6 @@ func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
 }
 ```
 
-## Complete Request/Response Flow
-
-AutoFiber provides a complete flow similar to FastAPI:
-
-```
-Parse Request → Validate Request → Execute Handler → Validate Response → Return JSON
-```
-
-### Flow Details
-
-1. **Parse Request**: Automatically parse from multiple sources (body, query, path, headers, cookies)
-2. **Validate Request**: Validate parsed data against struct tags
-3. **Execute Handler**: Run your business logic
-4. **Validate Response**: Validate response data before sending
-5. **Return JSON**: Send validated response to client
-
 ## Documentation
 
 - [docs/README.md](docs/README.md) - Documentation index & guides
@@ -168,6 +168,15 @@ Parse Request → Validate Request → Execute Handler → Validate Response →
 - [docs/complete-flow.md](docs/complete-flow.md) - Full request/response flow
 - [docs/validation-rules.md](docs/validation-rules.md) - Validation rules & custom validators
 - [example/](example/) - Example app
+
+## Contributing
+
+If you find any issues or want to improve the documentation:
+
+1. Check the existing documentation first
+2. Create an issue or pull request
+3. Follow the same format and style as existing docs
+4. Include practical examples and use cases
 
 ## License
 
