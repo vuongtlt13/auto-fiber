@@ -181,6 +181,15 @@ app.Post("/users", handler.CreateUser,
     autofiber.WithDescription("Create a new user"),
 )
 
+// You can also use generic response schemas for consistent API responses:
+type APIResponse[T any] struct {
+    Code    int    `json:"code"`
+    Message string `json:"message"`
+    Data    T      `json:"data"`
+}
+
+app.Get("/user", handler.GetUser, autofiber.WithResponseSchema(APIResponse[UserResponse]{}))
+
 func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
     user := UserResponse{
         ID:        1,
@@ -333,9 +342,9 @@ type UserRequest struct {
 Configure routes with flexible options:
 
 ```go
-app.Post("/users", handler.CreateUser,
-    autofiber.WithRequestSchema(CreateUserRequest{}),
-    autofiber.WithResponseSchema(UserResponse{}),
+    app.Post("/users", handler.CreateUser,
+        autofiber.WithRequestSchema(CreateUserRequest{}),
+        autofiber.WithResponseSchema(UserResponse{}),
     autofiber.WithDescription("Create a new user account"),
     autofiber.WithTags("users", "admin"),
     autofiber.WithMiddleware(authMiddleware, loggingMiddleware),
@@ -588,3 +597,6 @@ func TestCreateUserFlow(t *testing.T) {
 ```
 
 This complete flow ensures that your AutoFiber applications are robust, consistent, and maintainable.
+
+- Use generic response wrappers (e.g., `APIResponse[T]`) for consistent API responses and OpenAPI documentation. The OpenAPI spec will reference the correct schema name (e.g., `APIResponse_User`).
+- Only POST, PUT, PATCH methods generate a request body in OpenAPI. GET, DELETE, HEAD, OPTIONS do not, even if a request schema is provided.

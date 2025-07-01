@@ -15,6 +15,19 @@ A FastAPI-like wrapper for the Fiber web framework in Go, providing automatic re
 - **⚙️ Route Options**: Flexible route configuration with options pattern
 - **🔌 Middleware Integration**: Seamless integration with Fiber middleware
 - **🎯 Clean Architecture**: Modular design with separate concerns
+- **OpenAPI Schema Naming & Generic Response**:
+  - **Schema Naming:** AutoFiber generates OpenAPI schema names that are RFC3986-compliant. For generic structs, the schema name will be in the form `APIResponse_User` (for `APIResponse[User]`). For non-generic structs, the schema name is simply the type name (e.g., `LoginResponse`).
+  - **Generic Response Support:** You can use generic response wrappers for consistent API responses. Example:
+    ```go
+    type APIResponse[T any] struct {
+        Code    int    `json:"code"`
+        Message string `json:"message"`
+        Data    T      `json:"data"`
+    }
+    // Usage in route:
+    app.Get("/user", handler.GetUser, autofiber.WithResponseSchema(APIResponse[User]{}))
+    ```
+  - **Request Body Rules:** Only POST, PUT, and PATCH methods generate a `requestBody` in the OpenAPI spec. GET, DELETE, HEAD, and OPTIONS never have a request body, even if a request schema is provided.
 
 ## Installation
 
@@ -78,6 +91,12 @@ type UserResponse struct {
     CreatedAt time.Time `json:"created_at" validate:"required"`
 }
 
+type APIResponse[T any] struct {
+    Code    int    `json:"code"`
+    Message string `json:"message"`
+    Data    T      `json:"data"`
+}
+
 type UserHandler struct{}
 
 // Handler signature for AutoFiber:
@@ -90,6 +109,18 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interfac
         CreatedAt: time.Now(),
     }
     return user, nil
+}
+
+// Handler returning generic response
+func (h *UserHandler) GetUser(c *fiber.Ctx) (interface{}, error) {
+    user := UserResponse{
+        ID:        1,
+        Email:     "user@example.com",
+        Name:      "John Doe",
+        Role:      "user",
+        CreatedAt: time.Now(),
+    }
+    return APIResponse[UserResponse]{Code: 0, Message: "success", Data: user}, nil
 }
 
 func main() {
@@ -109,6 +140,12 @@ func main() {
         autofiber.WithResponseSchema(UserResponse{}),
         autofiber.WithDescription("Create a new user in an organization"),
         autofiber.WithTags("users", "admin"),
+    )
+
+    app.Get("/user", handler.GetUser,
+        autofiber.WithResponseSchema(APIResponse[UserResponse]{}),
+        autofiber.WithDescription("Get a user with generic response"),
+        autofiber.WithTags("users"),
     )
 
     app.ServeDocs("/docs")

@@ -100,6 +100,30 @@ type Post struct {
 }
 ```
 
+## OpenAPI Schema Naming
+
+- For non-generic structs, the schema name is the type name (e.g., `LoginResponse`).
+- For generic structs, the schema name is the base name plus the type parameter (e.g., `APIResponse_User` for `APIResponse[User]`).
+- All schema names are sanitized to contain only alphanumeric characters and underscores, ensuring compatibility with Swagger UI and code generators.
+
+### Example: Generic Response
+
+```go
+type APIResponse[T any] struct {
+    Code    int    `json:"code"`
+    Message string `json:"message"`
+    Data    T      `json:"data"`
+}
+
+type User struct {
+    ID   int    `json:"id"`
+    Name string `json:"name"`
+}
+
+// Usage in route registration:
+app.Get("/user", handler.GetUser, autofiber.WithResponseSchema(APIResponse[User]{}))
+```
+
 ## Parse Tags
 
 Parse tags specify where AutoFiber should extract data from the HTTP request.

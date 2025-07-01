@@ -39,6 +39,9 @@ If you're new to AutoFiber, start here:
 - JSON tag best practices
 - Special cases and edge scenarios
 - Common patterns for CRUD operations, authentication, and search
+- **How OpenAPI schema names are generated for generic and non-generic types**
+- **How to use generic response wrappers and reference them in OpenAPI**
+- **Request body generation rules for each HTTP method**
 
 ### From Complete Flow Guide
 
@@ -158,6 +161,18 @@ type ComplexRequest struct {
     Name   string `json:"name" validate:"required"`
 }
 ```
+
+### OpenAPI Schema Naming for Generics
+
+- Generic structs (e.g., `APIResponse[User]`) are named as `APIResponse_User` in OpenAPI. Non-generic structs use their type name.
+
+### Generic Response Support
+
+- Use generic wrappers for consistent API responses and OpenAPI documentation.
+
+### Request Body Rules
+
+- Only POST, PUT, PATCH methods generate a request body in OpenAPI. GET, DELETE, HEAD, OPTIONS do not, even if a request schema is provided.
 
 ## 📝 Contributing
 
