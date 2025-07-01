@@ -80,7 +80,7 @@ type UserResponse struct {
 
 type UserHandler struct{}
 
-// Handler signature CHUẨN cho AutoFiber:
+// Handler signature for AutoFiber:
 func (h *UserHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
     user := UserResponse{
         ID:        1,
@@ -119,16 +119,16 @@ func main() {
 
 ## Handler Signatures
 
-**Nên dùng:**
+**Recommended:**
 
 ```go
-// Handler chuẩn: trả về data và error, AutoFiber tự marshal JSON
+// Standard handler: return data and error, AutoFiber will marshal JSON automatically
 func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
     return ResponseSchema{...}, nil
 }
 ```
 
-**Chỉ dùng cho health check hoặc custom response:**
+**Use only for health check or custom response:**
 
 ```go
 func (h *Handler) Health(c *fiber.Ctx) error {
@@ -136,10 +136,10 @@ func (h *Handler) Health(c *fiber.Ctx) error {
 }
 ```
 
-**KHÔNG nên dùng:**
+**NOT recommended:**
 
 ```go
-// Không nên tự gọi c.JSON nếu đã có request schema
+// Do not call c.JSON manually if you already have a request schema
 func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
     return c.JSON(...)
 }

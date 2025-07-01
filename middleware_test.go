@@ -273,7 +273,7 @@ func TestValidateAndJSON(t *testing.T) {
 }
 
 // =============================================================================
-// 1. Trường hợp có parse tag
+// 1. Case with parse tag
 // =============================================================================
 func TestAutoParseRequest_ParseTag_Query(t *testing.T) {
 	type Req struct {
@@ -308,7 +308,7 @@ func TestAutoParseRequest_ParseTag_Path(t *testing.T) {
 }
 
 // =============================================================================
-// 2. Không có parse tag nhưng có json tag
+// 2. No parse tag but has json tag
 // =============================================================================
 func TestAutoParseRequest_JsonTag_Query(t *testing.T) {
 	type Req struct {
@@ -339,12 +339,12 @@ func TestAutoParseRequest_JsonTag_Body(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(body)))
 	req.Header.Set("Content-Type", "application/json")
 	resp := testAutoParseRequest(t, &Req{}, handler, req)
-	// Không lỗi validate
+	// No validation error
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 // =============================================================================
-// 3. Không có parse tag, không có json tag (dùng tên field)
+// 3. No parse tag, no json tag (use field name)
 // =============================================================================
 func TestAutoParseRequest_NoTag_FieldName_Query(t *testing.T) {
 	type Req struct {
@@ -362,7 +362,7 @@ func TestAutoParseRequest_NoTag_FieldName_Query(t *testing.T) {
 }
 
 // =============================================================================
-// 4. Không có parse tag, không có json tag, không truyền đúng key (báo lỗi required)
+// 4. No parse tag, no json tag, missing correct key (should return required error)
 // =============================================================================
 func TestAutoParseRequest_NoTag_FieldName_RequiredError(t *testing.T) {
 	type Req struct {
@@ -374,7 +374,7 @@ func TestAutoParseRequest_NoTag_FieldName_RequiredError(t *testing.T) {
 		return nil, nil
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil) // Không truyền Username
+	req := httptest.NewRequest(http.MethodGet, "/", nil) // No Username
 	resp := testAutoParseRequest(t, &Req{}, handler, req)
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 }

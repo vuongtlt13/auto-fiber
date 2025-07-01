@@ -68,7 +68,7 @@ If you're new to AutoFiber, start here:
 
 ```go
 // Request schema with multi-source parsing
-// (parse từ path, query, header, body)
+// (parse from path, query, header, body)
 type CreateUserRequest struct {
     OrgID    int    `parse:"path:org_id" validate:"required"`
     Role     string `parse:"query:role" validate:"required,oneof=admin user"`
