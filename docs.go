@@ -135,16 +135,15 @@ type DocsGenerator struct {
 	routes   []RouteInfo
 	schemas  map[string]OpenAPISchema
 	tags     map[string]OpenAPITag
-	basePath string
+	DocsInfo *OpenAPIInfo
 }
 
 // NewDocsGenerator creates a new documentation generator with the specified base path.
-func NewDocsGenerator(basePath string) *DocsGenerator {
+func NewDocsGenerator() *DocsGenerator {
 	return &DocsGenerator{
-		routes:   []RouteInfo{},
-		schemas:  make(map[string]OpenAPISchema),
-		tags:     make(map[string]OpenAPITag),
-		basePath: basePath,
+		routes:  []RouteInfo{},
+		schemas: make(map[string]OpenAPISchema),
+		tags:    make(map[string]OpenAPITag),
 	}
 }
 
@@ -178,8 +177,44 @@ func (dg *DocsGenerator) AddRoute(path, method string, handler interface{}, opti
 	}
 }
 
+// convertPathToOpenAPIFormat converts Fiber path format (:param) to OpenAPI format ({param})
+func convertPathToOpenAPIFormat(path string) string {
+	// Replace :param with {param}
+	result := path
+	for {
+		colonIndex := strings.Index(result, ":")
+		if colonIndex == -1 {
+			break
+		}
+
+		// Find the end of the parameter (next / or end of string)
+		endIndex := len(result)
+		for i := colonIndex + 1; i < len(result); i++ {
+			if result[i] == '/' {
+				endIndex = i
+				break
+			}
+		}
+
+		// Replace :param with {param}
+		paramName := result[colonIndex+1 : endIndex]
+		result = result[:colonIndex] + "{" + paramName + "}" + result[endIndex:]
+	}
+
+	return result
+}
+
 // GenerateOpenAPISpec generates the complete OpenAPI specification from collected route information.
-func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
+func (dg *DocsGenerator) GenerateOpenAPISpec() *OpenAPISpec {
+	// Use stored DocsInfo or default
+	info := OpenAPIInfo{
+		Title:   "AutoFiber API",
+		Version: "1.0.0",
+	}
+	if dg.DocsInfo != nil {
+		info = *dg.DocsInfo
+	}
+
 	spec := &OpenAPISpec{
 		OpenAPI: "3.0.0",
 		Info:    info,
@@ -191,13 +226,6 @@ func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
 		Tags: dg.getTagsList(),
 	}
 
-	// Add default server if basePath is provided
-	if dg.basePath != "" {
-		spec.Servers = []OpenAPIServer{
-			{URL: dg.basePath, Description: "Default server"},
-		}
-	}
-
 	// Track if any route needs bearer auth
 	needsBearerAuth := false
 
@@ -207,7 +235,8 @@ func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
 		if hasBearer {
 			needsBearerAuth = true
 		}
-		spec.Paths[route.Path] = path
+		openAPIPath := convertPathToOpenAPIFormat(route.Path)
+		spec.Paths[openAPIPath] = path
 	}
 
 	// Add bearerAuth security scheme if needed
@@ -224,8 +253,8 @@ func (dg *DocsGenerator) GenerateOpenAPISpec(info OpenAPIInfo) *OpenAPISpec {
 
 // GenerateJSON generates the OpenAPI specification as JSON bytes.
 // This is useful for serving the specification via HTTP or saving to a file.
-func (dg *DocsGenerator) GenerateJSON(info OpenAPIInfo) ([]byte, error) {
-	spec := dg.GenerateOpenAPISpec(info)
+func (dg *DocsGenerator) GenerateJSON() ([]byte, error) {
+	spec := dg.GenerateOpenAPISpec()
 	return json.MarshalIndent(spec, "", "  ")
 }
 
@@ -683,22 +712,4 @@ func getSchemaName(schema interface{}) string {
 		t = t.Elem()
 	}
 	return t.Name()
-}
-
-// WithDocsInfo sets documentation information for the API.
-// This is a global option that affects the entire API documentation.
-func WithDocsInfo(info OpenAPIInfo) RouteOption {
-	return func(opts *RouteOptions) {
-		// This is a global option, not per-route
-		// We'll handle this in the main AutoFiber struct
-	}
-}
-
-// WithDocsServer adds a server to the documentation.
-// This is a global option that affects the entire API documentation.
-func WithDocsServer(server OpenAPIServer) RouteOption {
-	return func(opts *RouteOptions) {
-		// This is a global option, not per-route
-		// We'll handle this in the main AutoFiber struct
-	}
 }

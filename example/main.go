@@ -108,13 +108,13 @@ type LoginResponse struct {
 type AuthHandler struct{}
 
 // Handler with request parsing (no response validation)
-func (h *AuthHandler) Login(c *fiber.Ctx, req *LoginRequest) error {
+func (h *AuthHandler) Login(c *fiber.Ctx, req *LoginRequest) (interface{}, error) {
 	// req is automatically parsed and validated
-	return c.JSON(fiber.Map{
+	return fiber.Map{
 		"message": "Login successful",
 		"email":   req.Email,
 		"token":   "jwt_token_here",
-	})
+	}, nil
 }
 
 // Handler with request parsing and response validation
@@ -292,10 +292,11 @@ func validateStrongPassword(fl validator.FieldLevel) bool {
 
 func main() {
 	// Create AutoFiber app with docs configuration
-	app := autofiber.New(fiber.Config{
-		EnablePrintRoutes: true,
-	}).
-		WithDocsInfo(autofiber.OpenAPIInfo{
+	app := autofiber.New(
+		fiber.Config{
+			EnablePrintRoutes: true,
+		},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
 			Title:       "AutoFiber Complete Flow Example",
 			Description: "Demonstrating complete flow: parse request -> validate request -> execute handler -> validate response",
 			Version:     "1.0.0",
@@ -303,11 +304,8 @@ func main() {
 				Name:  "AutoFiber Team",
 				Email: "team@autofiber.com",
 			},
-		}).
-		WithDocsServer(autofiber.OpenAPIServer{
-			URL:         "http://localhost:3000",
-			Description: "Development server",
-		})
+		}),
+	)
 
 	// Add custom validator with custom validation rules
 	validator := autofiber.GetValidator()
@@ -317,45 +315,55 @@ func main() {
 	app.Use(logger.New())
 
 	handler := &AuthHandler{}
+	userHandler := &UserHandler{}
 
-	// Register routes with auto-parse and documentation
-	app.Post("/login", handler.Login,
+	// Create group for auth
+	authGroup := app.Group("/auth")
+	authGroup.Post("/login",
+		handler.Login,
 		autofiber.WithRequestSchema(LoginRequest{}),
 		autofiber.WithDescription("Authenticate user and return JWT token (no response validation)"),
 		autofiber.WithTags("auth", "authentication"),
 	)
-
-	// Route with complete flow: parse request -> validate request -> execute handler -> validate response
-	app.Post("/login-with-validation", handler.LoginWithValidation,
+	authGroup.Post("/login-with-validation", handler.LoginWithValidation,
 		autofiber.WithRequestSchema(LoginRequest{}),
 		autofiber.WithResponseSchema(LoginResponse{}),
 		autofiber.WithDescription("Authenticate user with response validation (complete flow demonstration)"),
 		autofiber.WithTags("auth", "authentication"),
 	)
-
-	app.Post("/register", handler.Register,
+	authGroup.Post("/register", handler.Register,
 		autofiber.WithRequestSchema(RegisterRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
 		autofiber.WithDescription("Register a new user account (with response validation)"),
 		autofiber.WithTags("auth", "user"),
 	)
 
-	// Route with query parameters and headers using parse tag
-	app.Get("/users", handler.ListUsers,
+	// Create group for user
+	userGroup := app.Group("/users")
+	userGroup.Get("/", handler.ListUsers,
 		autofiber.WithRequestSchema(UserFilterRequest{}),
 		autofiber.WithDescription("List users with filtering, pagination, and authentication"),
 		autofiber.WithTags("user", "admin"),
 	)
-
-	// Route with smart parsing (auto-detect source) and response validation
-	app.Get("/users/:user_id", handler.GetUser,
+	userGroup.Get(":user_id", handler.GetUser,
 		autofiber.WithRequestSchema(GetUserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
 		autofiber.WithDescription("Get user by ID with smart parsing and response validation"),
 		autofiber.WithTags("user", "admin"),
 	)
+	userGroup.Post("/simple", userHandler.CreateSimpleUser,
+		autofiber.WithRequestSchema(SimpleUserRequest{}),
+		autofiber.WithResponseSchema(UserResponse{}),
+		autofiber.WithDescription("Create simple user (body only, json tag)"),
+		autofiber.WithTags("user"),
+	)
+	userGroup.Post("/from-map", userHandler.CreateUserFromMap,
+		autofiber.WithResponseSchema(UserResponse{}),
+		autofiber.WithDescription("Create user from map (manual parse)"),
+		autofiber.WithTags("user", "example"),
+	)
 
-	// Route with path parameter, query parameters, headers, and body using parse tag with response validation
+	// The route for creating a user in an organization remains outside the group due to its special path
 	app.Post("/organizations/:org_id/users", handler.CreateUser,
 		autofiber.WithRequestSchema(CreateUserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
@@ -363,7 +371,11 @@ func main() {
 		autofiber.WithTags("user", "admin"),
 	)
 
-	app.Get("/health", handler.Health,
+	app.Get("/health",
+		func(c *fiber.Ctx) (interface{}, error) {
+			err := handler.Health(c)
+			return nil, err
+		},
 		autofiber.WithDescription("Health check endpoint"),
 		autofiber.WithTags("system"),
 	)
@@ -378,8 +390,8 @@ func main() {
 	log.Println("Swagger UI: http://localhost:3000/swagger")
 	log.Println("")
 	log.Println("Complete Flow Examples:")
-	log.Println("- POST /register: Parse request -> Validate request -> Execute handler -> Validate response")
-	log.Println("- POST /login-with-validation: Same complete flow with login response")
+	log.Println("- POST /auth/register: Parse request -> Validate request -> Execute handler -> Validate response")
+	log.Println("- POST /auth/login-with-validation: Same complete flow with login response")
 	log.Println("- GET /users/:user_id: Smart parsing with response validation")
 	log.Println("- POST /organizations/:org_id/users: Multi-source parsing with response validation")
 	app.Listen(":3000")

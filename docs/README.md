@@ -43,7 +43,13 @@ If you're new to AutoFiber, start here:
 ### From Complete Flow Guide
 
 - The complete request/response flow in AutoFiber
-- Different handler signatures and when to use them
+- **Recommended handler signature:**
+  ```go
+  func (h *Handler) MyEndpoint(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
+      // Business logic
+      return ResponseSchema{...}, nil
+  }
+  ```
 - Response validation and error handling
 - Real-world examples with authentication and user management
 - Best practices for building robust APIs
@@ -62,6 +68,7 @@ If you're new to AutoFiber, start here:
 
 ```go
 // Request schema with multi-source parsing
+// (parse từ path, query, header, body)
 type CreateUserRequest struct {
     OrgID    int    `parse:"path:org_id" validate:"required"`
     Role     string `parse:"query:role" validate:"required,oneof=admin user"`
@@ -70,7 +77,6 @@ type CreateUserRequest struct {
     Name     string `json:"name" validate:"required"`
 }
 
-// Response schema with validation
 type UserResponse struct {
     ID        int       `json:"id" validate:"required"`
     Email     string    `json:"email" validate:"required,email"`
@@ -79,7 +85,7 @@ type UserResponse struct {
     CreatedAt time.Time `json:"created_at" validate:"required"`
 }
 
-// Handler with complete flow
+// Handler signature CHUẨN cho AutoFiber:
 func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
     user := UserResponse{
         ID:        1,
@@ -111,10 +117,10 @@ type LoginResponse struct {
 
 ```go
 type SearchRequest struct {
-    Query     string   `parse:"query:q" validate:"omitempty,min=2"`
+    Query      string   `parse:"query:q" validate:"omitempty,min=2"`
     Categories []string `parse:"query:categories" validate:"omitempty,dive,oneof=tech sports news"`
-    Page      int      `parse:"query:page" validate:"omitempty,gte=1"`
-    Limit     int      `parse:"query:limit" validate:"omitempty,gte=1,lte=100"`
+    Page       int      `parse:"query:page" validate:"omitempty,gte=1"`
+    Limit      int      `parse:"query:limit" validate:"omitempty,gte=1,lte=100"`
 }
 ```
 

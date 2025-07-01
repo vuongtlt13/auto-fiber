@@ -3,12 +3,13 @@ package autofiber_test
 import (
 	"testing"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
 	autofiber "github.com/vuongtlt13/auto-fiber"
 )
 
 func TestAutoFiber_Struct(t *testing.T) {
-	app := autofiber.New()
+	app := autofiber.New(fiber.Config{})
 	assert.NotNil(t, app)
 	assert.NotNil(t, app.App)
 }

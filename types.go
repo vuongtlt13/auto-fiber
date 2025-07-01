@@ -6,12 +6,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// AutoFiberGroup represents a group of routes with a common prefix and shared middleware.
-type AutoFiberGroup struct {
-	Group *fiber.Group // Underlying Fiber group
-	app   *AutoFiber   // Reference to the parent AutoFiber app
-}
-
 // RouteOption is a function that configures route options for an endpoint.
 type RouteOption func(*RouteOptions)
 

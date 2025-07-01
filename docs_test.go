@@ -16,49 +16,20 @@ import (
 // DOCUMENTATION CONFIGURATION TESTS
 // =============================================================================
 
-func TestWithDocsInfo(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:       "Test API",
-		Description: "Test API Description",
-		Version:     "1.0.0",
-		Contact: &autofiber.OpenAPIContact{
-			Name:  "Test Team",
-			Email: "test@example.com",
-		},
-	})
+func TestWithOpenAPI(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:       "Test API",
+			Description: "Test Description",
+			Version:     "1.0.0",
+		}),
+	)
 
 	// Test that docs info is set
 	spec := app.GetOpenAPISpec()
 	assert.Equal(t, "Test API", spec.Info.Title)
-	assert.Equal(t, "Test API Description", spec.Info.Description)
+	assert.Equal(t, "Test Description", spec.Info.Description)
 	assert.Equal(t, "1.0.0", spec.Info.Version)
-	assert.Equal(t, "Test Team", spec.Info.Contact.Name)
-	assert.Equal(t, "test@example.com", spec.Info.Contact.Email)
-}
-
-func TestWithDocsServer(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsServer(autofiber.OpenAPIServer{
-		URL:         "http://localhost:3000",
-		Description: "Development server",
-	})
-
-	// Test that server is added
-	spec := app.GetOpenAPISpec()
-	assert.Len(t, spec.Servers, 1)
-	assert.Equal(t, "http://localhost:3000", spec.Servers[0].URL)
-	assert.NotEmpty(t, spec.Servers[0].Description)
-}
-
-func TestWithDocsBasePath(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsBasePath("/api/v1")
-
-	// Test that base path is set
-	spec := app.GetOpenAPISpec()
-	// The base path should be reflected in the docs generator
-	assert.NotNil(t, spec)
 }
 
 // =============================================================================
@@ -66,11 +37,12 @@ func TestWithDocsBasePath(t *testing.T) {
 // =============================================================================
 
 func TestGetOpenAPISpec(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	spec := app.GetOpenAPISpec()
 	assert.NotNil(t, spec)
@@ -80,11 +52,12 @@ func TestGetOpenAPISpec(t *testing.T) {
 }
 
 func TestGetOpenAPIJSON(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	jsonData, err := app.GetOpenAPIJSON()
 	assert.NoError(t, err)
@@ -103,15 +76,16 @@ func TestGetOpenAPIJSON(t *testing.T) {
 // =============================================================================
 
 func TestServeDocs(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	// Register a test route to generate some docs
-	app.Get("/test", func(c *fiber.Ctx) error {
-		return c.SendString("test")
+	app.Get("/test", func(c *fiber.Ctx) (interface{}, error) {
+		return "test", nil
 	}, autofiber.WithDescription("Test endpoint"))
 
 	// Serve docs
@@ -132,11 +106,12 @@ func TestServeDocs(t *testing.T) {
 }
 
 func TestServeSwaggerUI(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	// Serve Swagger UI
 	app.ServeSwaggerUI("/swagger", "/docs")
@@ -154,11 +129,12 @@ func TestServeSwaggerUI(t *testing.T) {
 // =============================================================================
 
 func TestRouteWithDescription(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	type TestRequest struct {
 		Name string `json:"name" validate:"required"`
@@ -198,18 +174,19 @@ func TestRouteWithDescription(t *testing.T) {
 }
 
 func TestRouteWithTags(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
-	app.Get("/users", func(c *fiber.Ctx) error {
-		return c.SendString("users")
+	app.Get("/users", func(c *fiber.Ctx) (interface{}, error) {
+		return "users", nil
 	}, autofiber.WithTags("users", "admin"))
 
-	app.Get("/auth", func(c *fiber.Ctx) error {
-		return c.SendString("auth")
+	app.Get("/auth", func(c *fiber.Ctx) (interface{}, error) {
+		return "auth", nil
 	}, autofiber.WithTags("auth", "authentication"))
 
 	// Generate OpenAPI spec
@@ -233,11 +210,12 @@ func TestRouteWithTags(t *testing.T) {
 // =============================================================================
 
 func TestSchemaGeneration_SimpleTypes(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	type SimpleRequest struct {
 		Name   string `json:"name" validate:"required" description:"User name"`
@@ -246,8 +224,8 @@ func TestSchemaGeneration_SimpleTypes(t *testing.T) {
 		Active bool   `json:"active" description:"User active status"`
 	}
 
-	app.Post("/simple", func(c *fiber.Ctx, req *SimpleRequest) error {
-		return c.JSON(req)
+	app.Post("/simple", func(c *fiber.Ctx, req *SimpleRequest) (interface{}, error) {
+		return req, nil
 	}, autofiber.WithRequestSchema(SimpleRequest{}))
 
 	spec := app.GetOpenAPISpec()
@@ -276,11 +254,12 @@ func TestSchemaGeneration_SimpleTypes(t *testing.T) {
 }
 
 func TestSchemaGeneration_ComplexTypes(t *testing.T) {
-	app := autofiber.New()
-	app.WithDocsInfo(autofiber.OpenAPIInfo{
-		Title:   "Test API",
-		Version: "1.0.0",
-	})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	type Address struct {
 		Street  string `json:"street" description:"Street address"`
@@ -296,8 +275,8 @@ func TestSchemaGeneration_ComplexTypes(t *testing.T) {
 		Created time.Time `json:"created" description:"Creation date"`
 	}
 
-	app.Post("/complex", func(c *fiber.Ctx, req *ComplexRequest) error {
-		return c.JSON(req)
+	app.Post("/complex", func(c *fiber.Ctx, req *ComplexRequest) (interface{}, error) {
+		return req, nil
 	}, autofiber.WithRequestSchema(ComplexRequest{}))
 
 	spec := app.GetOpenAPISpec()
@@ -317,8 +296,8 @@ func TestSchemaGeneration_ComplexTypes(t *testing.T) {
 
 func TestCompleteDocumentationFlow(t *testing.T) {
 	// Create app with full documentation setup
-	app := autofiber.New().
-		WithDocsInfo(autofiber.OpenAPIInfo{
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
 			Title:       "Complete Test API",
 			Description: "A complete test API with full documentation",
 			Version:     "1.0.0",
@@ -326,11 +305,8 @@ func TestCompleteDocumentationFlow(t *testing.T) {
 				Name:  "Test Team",
 				Email: "test@example.com",
 			},
-		}).
-		WithDocsServer(autofiber.OpenAPIServer{
-			URL:         "http://localhost:3000",
-			Description: "Development server",
-		})
+		}),
+	)
 
 	// Define request and response schemas
 	type UserRequest struct {
@@ -348,7 +324,7 @@ func TestCompleteDocumentationFlow(t *testing.T) {
 	}
 
 	// Register routes with full documentation
-	app.Post("/users", func(c *fiber.Ctx, req *UserRequest) error {
+	app.Post("/users", func(c *fiber.Ctx, req *UserRequest) (interface{}, error) {
 		response := &UserResponse{
 			ID:        1,
 			Name:      req.Name,
@@ -356,13 +332,14 @@ func TestCompleteDocumentationFlow(t *testing.T) {
 			Age:       req.Age,
 			CreatedAt: time.Now(),
 		}
-		return c.JSON(response)
+		return response, nil
 	}, autofiber.WithRequestSchema(UserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
-		autofiber.WithDescription("Create a new user"),
-		autofiber.WithTags("users", "admin"))
+		autofiber.WithDescription("Create a new user with complete documentation flow"),
+		autofiber.WithTags("users", "api"),
+	)
 
-	app.Get("/users/:id", func(c *fiber.Ctx) error {
+	app.Get("/users/:id", func(c *fiber.Ctx) (interface{}, error) {
 		response := &UserResponse{
 			ID:        1,
 			Name:      "John Doe",
@@ -370,10 +347,9 @@ func TestCompleteDocumentationFlow(t *testing.T) {
 			Age:       25,
 			CreatedAt: time.Now(),
 		}
-		return c.JSON(response)
-	}, autofiber.WithResponseSchema(UserResponse{}),
-		autofiber.WithDescription("Get user by ID"),
-		autofiber.WithTags("users", "read"))
+		return response, nil
+	}, autofiber.WithDescription("Get user by ID"),
+		autofiber.WithTags("users", "api"))
 
 	// Serve documentation
 	app.ServeDocs("/docs")
@@ -384,8 +360,6 @@ func TestCompleteDocumentationFlow(t *testing.T) {
 	assert.NotNil(t, spec)
 	assert.Equal(t, "Complete Test API", spec.Info.Title)
 	assert.Equal(t, "A complete test API with full documentation", spec.Info.Description)
-	assert.Len(t, spec.Servers, 1)
-	assert.Equal(t, "http://localhost:3000", spec.Servers[0].URL)
 
 	// Test that routes are documented
 	assert.NotNil(t, spec.Paths["/users"])
@@ -402,4 +376,83 @@ func TestCompleteDocumentationFlow(t *testing.T) {
 	resp, err = app.Test(req)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestGenerateRequestBody(t *testing.T) {
+	app := autofiber.New(fiber.Config{})
+
+	type TestRequest struct {
+		Name  string `json:"name" validate:"required"`
+		Email string `json:"email" validate:"required,email"`
+		Age   int    `json:"age" validate:"gte=18"`
+	}
+
+	app.Post("/test", func(c *fiber.Ctx, req *TestRequest) (interface{}, error) {
+		return req, nil
+	}, autofiber.WithRequestSchema(TestRequest{}))
+
+	spec := app.GetOpenAPISpec()
+	path := spec.Paths["/test"]
+	assert.NotNil(t, path.Post)
+	assert.NotNil(t, path.Post.RequestBody)
+	assert.NotNil(t, path.Post.RequestBody.Content["application/json"])
+}
+
+func TestGeneratePathWithSecurity_WithAuth(t *testing.T) {
+	app := autofiber.New(fiber.Config{})
+
+	type SecureRequest struct {
+		Token string `parse:"header:Authorization" validate:"required"`
+		Data  string `json:"data"`
+	}
+
+	app.Post("/secure", func(c *fiber.Ctx, req *SecureRequest) (interface{}, error) {
+		return fiber.Map{"message": "secure"}, nil
+	}, autofiber.WithRequestSchema(SecureRequest{}))
+
+	spec := app.GetOpenAPISpec()
+	path := spec.Paths["/secure"]
+	assert.NotNil(t, path.Post)
+	// Should have security requirements
+	assert.NotEmpty(t, path.Post.Security)
+}
+
+func TestGenerateParametersAndBodyWithSecurity_Complex(t *testing.T) {
+	app := autofiber.New(fiber.Config{})
+
+	type ComplexSecureRequest struct {
+		// Path parameter
+		ID int `parse:"path:id" validate:"required"`
+
+		// Query parameters
+		Page int `parse:"query:page" validate:"gte=1"`
+
+		// Headers
+		Token  string `parse:"header:Authorization" validate:"required"`
+		APIKey string `parse:"header:X-API-Key" validate:"required"`
+
+		// Body
+		Name  string `json:"name" validate:"required"`
+		Email string `json:"email" validate:"required,email"`
+	}
+
+	app.Put("/users/:id", func(c *fiber.Ctx, req *ComplexSecureRequest) (interface{}, error) {
+		return req, nil
+	}, autofiber.WithRequestSchema(ComplexSecureRequest{}))
+
+	spec := app.GetOpenAPISpec()
+	path := spec.Paths["/users/{id}"]
+	assert.NotNil(t, path)
+	assert.NotNil(t, path.Put)
+
+	// Should have parameters
+	if path.Put != nil {
+		assert.NotEmpty(t, path.Put.Parameters)
+
+		// Should have request body
+		assert.NotNil(t, path.Put.RequestBody)
+
+		// Should have security
+		assert.NotEmpty(t, path.Put.Security)
+	}
 }

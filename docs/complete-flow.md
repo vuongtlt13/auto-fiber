@@ -36,17 +36,8 @@ AutoFiber automatically parses data from multiple sources based on your struct t
 
 ```go
 type CreateUserRequest struct {
-    // Path parameter
-    OrgID int `parse:"path:org_id" validate:"required"`
-
-    // Query parameters
+    OrgID    int    `parse:"path:org_id" validate:"required"`
     Role     string `parse:"query:role" validate:"required,oneof=admin user"`
-    IsActive bool   `parse:"query:active" validate:"omitempty"`
-
-    // Headers
-    APIKey string `parse:"header:X-API-Key" validate:"required"`
-
-    // Body fields
     Email    string `json:"email" validate:"required,email"`
     Password string `json:"password" validate:"required,min=6"`
     Name     string `json:"name" validate:"required"`
@@ -56,8 +47,7 @@ type CreateUserRequest struct {
 **What happens**:
 
 - `OrgID` is extracted from URL path `/organizations/:org_id/users`
-- `Role` and `IsActive` are extracted from query string `?role=admin&active=true`
-- `APIKey` is extracted from header `X-API-Key: your-api-key`
+- `Role` is extracted from query string `?role=admin`
 - `Email`, `Password`, `Name` are extracted from JSON body
 
 ### 2. Validate Request
@@ -83,18 +73,15 @@ Role:     "admin"            // ✓ One of allowed values
 Your business logic is executed with the parsed and validated data:
 
 ```go
+// Recommended handler signature for AutoFiber:
 func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
-    // Business logic here
     user := UserResponse{
         ID:        1,
         Email:     req.Email,
         Name:      req.Name,
         Role:      req.Role,
-        IsActive:  req.IsActive,
-        OrgID:     req.OrgID,
         CreatedAt: time.Now(),
     }
-
     return user, nil
 }
 ```
@@ -115,8 +102,6 @@ type UserResponse struct {
     Email     string    `json:"email" validate:"required,email"`
     Name      string    `json:"name" validate:"required"`
     Role      string    `json:"role" validate:"required,oneof=admin user"`
-    IsActive  bool      `json:"is_active"`
-    OrgID     int       `json:"org_id" validate:"required"`
     CreatedAt time.Time `json:"created_at" validate:"required"`
 }
 ```
@@ -137,54 +122,15 @@ Validated response is automatically serialized to JSON:
   "email": "user@example.com",
   "name": "John Doe",
   "role": "admin",
-  "is_active": true,
-  "org_id": 123,
   "created_at": "2024-01-15T10:30:00Z"
 }
 ```
 
 ## Handler Signatures
 
-AutoFiber supports different handler signatures depending on your needs:
+AutoFiber supports the following handler signatures:
 
-### Simple Handler (No Request Parsing)
-
-```go
-func (h *Handler) SimpleHandler(c *fiber.Ctx) error {
-    return c.JSON(fiber.Map{
-        "message": "Hello World",
-        "timestamp": time.Now(),
-    })
-}
-```
-
-**When to use**:
-
-- For simple endpoints that don't need request parsing
-- For health checks, status endpoints
-- When you want full control over the response
-
-### Handler with Request Parsing (No Response Validation)
-
-```go
-func (h *Handler) RequestHandler(c *fiber.Ctx, req *RequestSchema) error {
-    // Process the parsed request
-    result := processData(req)
-
-    return c.JSON(fiber.Map{
-        "data": result,
-        "processed_at": time.Now(),
-    })
-}
-```
-
-**When to use**:
-
-- When you need request parsing but don't want response validation
-- For endpoints that return dynamic data structures
-- When you want to handle response formatting manually
-
-### Handler with Complete Flow (Request Parsing + Response Validation)
+### Recommended: Complete Flow (Request Parsing + Response Validation)
 
 ```go
 func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
@@ -194,379 +140,325 @@ func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}
         Name: req.Name,
         // ... other fields
     }
-
     // Return data and error - response will be automatically validated
     return result, nil
 }
 ```
 
-**When to use**:
+### For Health Check or Custom Response Only
 
-- For most API endpoints
-- When you want automatic response validation
-- For consistent API responses
-- When following the complete flow pattern
+```go
+func (h *Handler) Health(c *fiber.Ctx) error {
+    return c.JSON(fiber.Map{"status": "ok", "timestamp": time.Now()})
+}
+```
+
+**Avoid:**
+
+```go
+// Do NOT use this pattern for API endpoints with request schema
+func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
+    return c.JSON(...)
+}
+```
 
 ## Response Validation
 
-Response validation ensures that your API returns consistent and valid data.
+When you specify `WithResponseSchema()`, AutoFiber automatically validates the response:
 
-### Enabling Response Validation
+```go
+type UserResponse struct {
+    ID        int       `json:"id" validate:"required"`
+    Email     string    `json:"email" validate:"required,email"`
+    Name      string    `json:"name" validate:"required"`
+    Role      string    `json:"role" validate:"required,oneof=admin user"`
+    CreatedAt time.Time `json:"created_at" validate:"required"`
+}
+
+app.Post("/users", handler.CreateUser,
+    autofiber.WithRequestSchema(CreateUserRequest{}),
+    autofiber.WithResponseSchema(UserResponse{}),
+    autofiber.WithDescription("Create a new user"),
+)
+
+func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
+    user := UserResponse{
+        ID:        1,
+        Email:     req.Email,
+        Name:      req.Name,
+        Role:      "user",
+        CreatedAt: time.Now(),
+    }
+    // Response will be automatically validated against UserResponse schema
+    return user, nil
+}
+```
+
+If response validation fails, AutoFiber returns a 500 error with validation details.
+
+## Parse Tag
+
+AutoFiber uses a unified `parse` tag to specify where each field should be parsed from:
+
+### Parse Tag Format
+
+```go
+type Request struct {
+    // Basic format: parse:"source:key"
+    UserID int `parse:"path:user_id" validate:"required"`
+    Page   int `parse:"query:page" validate:"gte=1"`
+    Token  string `parse:"header:Authorization" validate:"required"`
+    Email  string `parse:"body:email" validate:"required,email"`
+
+    // With options: parse:"source:key,required,default:value"
+    Limit   int  `parse:"query:limit,required,default:10"`
+    Active  bool `parse:"query:active,default:true"`
+    Role    string `parse:"query:role,required,default:user"`
+}
+```
+
+### Supported Sources
+
+- `path` - URL path parameters (`/users/:id`)
+- `query` - Query string parameters (`?page=1&limit=10`)
+- `header` - HTTP headers (`Authorization: Bearer token`)
+- `cookie` - Cookies (`session_id=abc123`)
+- `form` - Form data (`multipart/form-data`)
+- `body` - JSON body (for POST/PUT/PATCH requests)
+- `auto` - Smart detection based on HTTP method
+
+### Parse Tag Options
+
+- `required` - Field is required (returns 422 if missing)
+- `default:value` - Default value if field is empty
+
+## Auto Parsing
+
+When no `parse` tag is specified, AutoFiber automatically detects the best source:
+
+### HTTP Method Priority
+
+- **GET**: `path` → `query` (no body parsing)
+- **POST/PUT/PATCH**: `path` → `query` → `body`
+- **DELETE**: `path` → `query` (no body parsing)
+
+### Auto Parsing Example
+
+```go
+type AutoRequest struct {
+    // These will be auto-detected based on HTTP method
+    UserID int    `json:"user_id" validate:"required" description:"User ID"`
+    Page   int    `json:"page" validate:"gte=1" description:"Page number"`
+    Email  string `json:"email" validate:"required,email" description:"User email"`
+    Name   string `json:"name" validate:"required" description:"User name"`
+}
+
+// For GET /users/:user_id?page=1
+// - user_id: parsed from path
+// - page: parsed from query
+// - email, name: not parsed (GET doesn't parse body)
+
+// For POST /users/:user_id?page=1
+// - user_id: parsed from path
+// - page: parsed from query
+// - email, name: parsed from JSON body
+```
+
+## JSON Tag Support
+
+AutoFiber supports `json` tag for field aliasing:
+
+```go
+type Request struct {
+    // Use json tag to alias field names
+    Email    string `json:"user_email" parse:"body:email" validate:"required,email"`
+    Password string `json:"user_password" parse:"body:password" validate:"required,min=6"`
+    Name     string `json:"full_name" parse:"body:name" validate:"required"`
+}
+```
+
+## Map and Interface Parsing
+
+AutoFiber provides utilities to parse structs from maps and interfaces:
+
+### Parse From Map
+
+```go
+// Parse from map[string]interface{}
+userData := map[string]interface{}{
+    "email":     "john@example.com",
+    "password":  "secret123",
+    "name":      "John Doe",
+    "age":       25,
+    "is_active": true,
+}
+
+var req SimpleUserRequest
+if err := autofiber.ParseFromMap(userData, &req); err != nil {
+    return err
+}
+```
+
+### Parse From Interface
+
+```go
+// Parse from any interface{} (map, struct, etc.)
+data := map[string]string{
+    "email": "john@example.com",
+    "name":  "John Doe",
+}
+
+var req SimpleUserRequest
+if err := autofiber.ParseFromInterface(data, &req); err != nil {
+    return err
+}
+```
+
+## Request Validation
+
+Use struct tags for validation:
+
+```go
+type UserRequest struct {
+    Email     string `parse:"body:email,required" description:"User email"`
+    Password  string `parse:"body:password,required" description:"User password"`
+    Age       int    `parse:"body:age" validate:"gte=18,lte=100" description:"User age"`
+    Role      string `parse:"body:role,required" validate:"oneof=admin user guest" description:"User role"`
+    IsActive  bool   `parse:"body:is_active" description:"User active status"`
+}
+```
+
+## Route Options
+
+Configure routes with flexible options:
 
 ```go
 app.Post("/users", handler.CreateUser,
     autofiber.WithRequestSchema(CreateUserRequest{}),
-    autofiber.WithResponseSchema(UserResponse{}), // This enables response validation
-    autofiber.WithDescription("Create a new user"),
+    autofiber.WithResponseSchema(UserResponse{}),
+    autofiber.WithDescription("Create a new user account"),
+    autofiber.WithTags("users", "admin"),
+    autofiber.WithMiddleware(authMiddleware, loggingMiddleware),
 )
 ```
 
-### Response Schema Definition
+## API Documentation
+
+AutoFiber automatically generates OpenAPI 3.0 specification and serves Swagger UI:
 
 ```go
-type UserResponse struct {
-    ID        int       `json:"id" validate:"required"`
-    Email     string    `json:"email" validate:"required,email"`
-    Name      string    `json:"name" validate:"required"`
-    Role      string    `json:"role" validate:"required,oneof=admin user"`
-    CreatedAt time.Time `json:"created_at" validate:"required"`
-}
+app := autofiber.NewWithOptions(
+    fiber.Config{},
+    autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+        Title:       "My API",
+        Description: "API description",
+        Version:     "1.0.0",
+        Contact: &autofiber.OpenAPIContact{
+            Name:  "API Team",
+            Email: "team@example.com",
+        },
+    }),
+)
+
+// Serve documentation
+app.ServeDocs("/docs")           // OpenAPI JSON at /docs
+app.ServeSwaggerUI("/swagger", "/docs") // Swagger UI at /swagger
 ```
 
-### Validation Rules for Responses
+### Smart Documentation Generation
+
+AutoFiber automatically generates proper OpenAPI documentation from your parse tags and auto parsing:
 
 ```go
-type ComprehensiveResponse struct {
-    // Required fields
-    ID        int       `json:"id" validate:"required"`
-    Email     string    `json:"email" validate:"required,email"`
+type CreateUserRequest struct {
+    // Path parameter - appears in "Parameters" section
+    OrgID int `parse:"path:org_id,required" description:"Organization ID"`
 
-    // Optional fields with validation
-    Bio       string    `json:"bio,omitempty" validate:"omitempty,max=500"`
-    Avatar    string    `json:"avatar,omitempty" validate:"omitempty,url"`
+    // Query parameters - appear in "Parameters" section
+    Role     string `parse:"query:role,required" description:"User role"`
+    IsActive bool   `parse:"query:active,default:true" description:"User active status"`
 
-    // Nested objects
-    Profile   *Profile  `json:"profile,omitempty" validate:"omitempty"`
+    // Header parameters - appear in "Parameters" section
+    APIKey string `parse:"header:X-API-Key,required" description:"API key"`
 
-    // Arrays
-    Tags      []string  `json:"tags,omitempty" validate:"omitempty,dive,min=1"`
+    // Body fields - appear in "Request Body" section
+    Email    string `parse:"body:email,required" description:"User email"`
+    Password string `parse:"body:password,required" description:"User password"`
+    Name     string `parse:"body:name,required" description:"User full name"`
+}
 
-    // Timestamps
-    CreatedAt time.Time `json:"created_at" validate:"required"`
-    UpdatedAt time.Time `json:"updated_at" validate:"required"`
+type AutoRequest struct {
+    // Auto-detected fields - appear in appropriate sections
+    UserID int    `json:"user_id" validate:"required" description:"User ID"`
+    Page   int    `json:"page" validate:"gte=1" description:"Page number"`
+    Email  string `json:"email" validate:"required,email" description:"User email"`
+    Name   string `json:"name" validate:"required" description:"User name"`
 }
 ```
 
-### Response Validation Errors
+**Generated OpenAPI Documentation:**
 
-If response validation fails, AutoFiber returns a 500 error:
+- **Parameters**: Path, query, header, cookie parameters
+- **Request Body**: Body fields and auto-detected body fields
+- **Response Schema**: Response validation schema
+- **Validation**: Required fields, format validation, enum values
+- **Descriptions**: Field descriptions from struct tags
+- **Default Values**: From `default` option in parse tag
 
-```json
-{
-  "error": "Response validation failed",
-  "details": "Field 'email' failed validation: 'invalid-email' is not a valid email"
-}
-```
+### Documentation Features
 
-**Common causes**:
-
-- Missing required fields
-- Invalid data types
-- Validation rule violations
-- Nested object validation failures
+- **Automatic Parameter Detection**: Path, query, header, cookie parameters
+- **Request Body Schema**: Body fields and auto-detected body fields
+- **Response Schema**: Response validation schema
+- **JSON Tag Support**: Field aliasing in documentation
+- **Validation Rules**: Required fields, format validation, enum values
+- **Field Descriptions**: From `description` struct tags
+- **Default Values**: From `default` option in parse tag
+- **Type Safety**: Proper OpenAPI types (string, integer, boolean, etc.)
+- **Interactive Testing**: Swagger UI for testing APIs directly
+- **Security Schemes**: Bearer token authentication support
 
 ## Error Handling
 
-AutoFiber provides clear error responses for different scenarios:
+AutoFiber provides clear error responses:
 
-### Parse Errors (400 Bad Request)
-
-```json
-{
-  "error": "Invalid request",
-  "details": "user_id (path): invalid integer value 'abc'"
-}
-```
-
-**Causes**:
-
-- Invalid JSON in request body
-- Type conversion failures (string to int, etc.)
-- Missing required path parameters
-
-### Validation Errors (422 Unprocessable Entity)
-
-```json
-{
-  "error": "Validation failed",
-  "details": "Field 'email' failed validation: 'invalid-email' is not a valid email"
-}
-```
-
-**Causes**:
-
-- Missing required fields
-- Invalid email formats
-- Value out of range
-- Enum value violations
-
-### Response Validation Errors (500 Internal Server Error)
-
-```json
-{
-  "error": "Response validation failed",
-  "details": "Field 'id' failed validation: '0' is not greater than or equal to 1"
-}
-```
-
-**Causes**:
-
-- Handler returned invalid data
-- Missing required response fields
-- Response validation rule violations
-
-### Handler Errors
-
-```go
-func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
-    // Return custom error
-    if req.Email == "admin@example.com" {
-        return nil, fiber.NewError(fiber.StatusConflict, "Email already exists")
-    }
-
-    // Return business logic error
-    if err := validateBusinessRules(req); err != nil {
-        return nil, err
-    }
-
-    // Success case
-    return UserResponse{...}, nil
-}
-```
+- **400 Bad Request**: Parse errors (invalid JSON, type conversion)
+- **422 Unprocessable Entity**: Validation errors (missing required fields, format validation)
+- **500 Internal Server Error**: Response validation errors
 
 ## Examples
 
-### Complete User Management API
+See the `example/` directory for complete working examples:
 
-```go
-// Request schemas
-type CreateUserRequest struct {
-    Email    string `json:"email" validate:"required,email"`
-    Password string `json:"password" validate:"required,min=6"`
-    Name     string `json:"name" validate:"required"`
-    Role     string `json:"role" validate:"required,oneof=admin user"`
-}
+- **Complete Flow**: Parse request → Validate request → Execute handler → Validate response
+- **Request Parsing**: Parse from multiple sources (body, query, path, headers, cookies)
+- **Response Validation**: Validate response data before sending
+- **Auto Parsing**: Automatic field source detection
+- **JSON Tag**: Field aliasing
+- **Map Parsing**: Parsing structs from maps and interfaces
+- **API Documentation**: OpenAPI and Swagger UI
+- **Custom Validation**: Custom validation functions
 
-type UpdateUserRequest struct {
-    UserID int    `parse:"path:user_id" validate:"required,min=1"`
-    Email  string `json:"email,omitempty" validate:"omitempty,email"`
-    Name   string `json:"name,omitempty" validate:"omitempty,min=2"`
-    Role   string `json:"role,omitempty" validate:"omitempty,oneof=admin user"`
-}
+## Run Example
 
-type GetUsersRequest struct {
-    Page     int    `parse:"query:page" validate:"omitempty,gte=1"`
-    Limit    int    `parse:"query:limit" validate:"omitempty,gte=1,lte=100"`
-    Search   string `parse:"query:search" validate:"omitempty,min=2"`
-    Role     string `parse:"query:role" validate:"omitempty,oneof=admin user"`
-}
-
-// Response schemas
-type UserResponse struct {
-    ID        int       `json:"id" validate:"required"`
-    Email     string    `json:"email" validate:"required,email"`
-    Name      string    `json:"name" validate:"required"`
-    Role      string    `json:"role" validate:"required,oneof=admin user"`
-    IsActive  bool      `json:"is_active"`
-    CreatedAt time.Time `json:"created_at" validate:"required"`
-    UpdatedAt time.Time `json:"updated_at" validate:"required"`
-}
-
-type UsersListResponse struct {
-    Users []UserResponse `json:"users" validate:"required"`
-    Page  int            `json:"page" validate:"required,gte=1"`
-    Limit int            `json:"limit" validate:"required,gte=1"`
-    Total int            `json:"total" validate:"required,gte=0"`
-}
-
-// Handlers
-type UserHandler struct{}
-
-func (h *UserHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
-    // Business logic
-    user := UserResponse{
-        ID:        1,
-        Email:     req.Email,
-        Name:      req.Name,
-        Role:      req.Role,
-        IsActive:  true,
-        CreatedAt: time.Now(),
-        UpdatedAt: time.Now(),
-    }
-
-    return user, nil
-}
-
-func (h *UserHandler) UpdateUser(c *fiber.Ctx, req *UpdateUserRequest) (interface{}, error) {
-    // Business logic
-    user := UserResponse{
-        ID:        req.UserID,
-        Email:     req.Email,
-        Name:      req.Name,
-        Role:      req.Role,
-        IsActive:  true,
-        CreatedAt: time.Now().Add(-24 * time.Hour), // Simulate existing user
-        UpdatedAt: time.Now(),
-    }
-
-    return user, nil
-}
-
-func (h *UserHandler) GetUsers(c *fiber.Ctx, req *GetUsersRequest) (interface{}, error) {
-    // Business logic
-    users := []UserResponse{
-        {
-            ID:        1,
-            Email:     "user1@example.com",
-            Name:      "User 1",
-            Role:      "user",
-            IsActive:  true,
-            CreatedAt: time.Now(),
-            UpdatedAt: time.Now(),
-        },
-        {
-            ID:        2,
-            Email:     "admin@example.com",
-            Name:      "Admin User",
-            Role:      "admin",
-            IsActive:  true,
-            CreatedAt: time.Now(),
-            UpdatedAt: time.Now(),
-        },
-    }
-
-    return UsersListResponse{
-        Users: users,
-        Page:  req.Page,
-        Limit: req.Limit,
-        Total: len(users),
-    }, nil
-}
-
-// Route registration
-func main() {
-    app := autofiber.New()
-    handler := &UserHandler{}
-
-    // Create user with complete flow
-    app.Post("/users", handler.CreateUser,
-        autofiber.WithRequestSchema(CreateUserRequest{}),
-        autofiber.WithResponseSchema(UserResponse{}),
-        autofiber.WithDescription("Create a new user"),
-        autofiber.WithTags("users"),
-    )
-
-    // Update user with complete flow
-    app.Put("/users/:user_id", handler.UpdateUser,
-        autofiber.WithRequestSchema(UpdateUserRequest{}),
-        autofiber.WithResponseSchema(UserResponse{}),
-        autofiber.WithDescription("Update an existing user"),
-        autofiber.WithTags("users"),
-    )
-
-    // Get users with complete flow
-    app.Get("/users", handler.GetUsers,
-        autofiber.WithRequestSchema(GetUsersRequest{}),
-        autofiber.WithResponseSchema(UsersListResponse{}),
-        autofiber.WithDescription("List users with pagination and filtering"),
-        autofiber.WithTags("users"),
-    )
-
-    app.Listen(":3000")
-}
+```bash
+go run example/main.go
 ```
 
-### Authentication Flow
+Then visit:
 
-```go
-// Request schemas
-type LoginRequest struct {
-    Email    string `json:"email" validate:"required,email"`
-    Password string `json:"password" validate:"required"`
-}
+- API: http://localhost:3000
+- Swagger UI: http://localhost:3000/swagger
+- OpenAPI JSON: http://localhost:3000/docs
 
-type AuthenticatedRequest struct {
-    Authorization string `parse:"header:Authorization" validate:"required"`
-    UserID        int    `parse:"path:user_id" validate:"required,min=1"`
-}
+### Example Endpoints
 
-// Response schemas
-type LoginResponse struct {
-    Token     string       `json:"token" validate:"required"`
-    User      UserResponse `json:"user" validate:"required"`
-    ExpiresAt time.Time    `json:"expires_at" validate:"required"`
-}
+The example includes endpoints demonstrating the complete flow:
 
-// Handlers
-type AuthHandler struct{}
-
-func (h *AuthHandler) Login(c *fiber.Ctx, req *LoginRequest) (interface{}, error) {
-    // Authentication logic
-    token := "jwt_token_here"
-    user := UserResponse{
-        ID:        1,
-        Email:     req.Email,
-        Name:      "John Doe",
-        Role:      "user",
-        IsActive:  true,
-        CreatedAt: time.Now(),
-        UpdatedAt: time.Now(),
-    }
-
-    return LoginResponse{
-        Token:     token,
-        User:      user,
-        ExpiresAt: time.Now().Add(24 * time.Hour),
-    }, nil
-}
-
-func (h *AuthHandler) GetProfile(c *fiber.Ctx, req *AuthenticatedRequest) (interface{}, error) {
-    // Get user profile logic
-    user := UserResponse{
-        ID:        req.UserID,
-        Email:     "user@example.com",
-        Name:      "John Doe",
-        Role:      "user",
-        IsActive:  true,
-        CreatedAt: time.Now(),
-        UpdatedAt: time.Now(),
-    }
-
-    return user, nil
-}
-
-// Route registration
-func main() {
-    app := autofiber.New()
-    handler := &AuthHandler{}
-
-    app.Post("/login", handler.Login,
-        autofiber.WithRequestSchema(LoginRequest{}),
-        autofiber.WithResponseSchema(LoginResponse{}),
-        autofiber.WithDescription("Authenticate user and return JWT token"),
-        autofiber.WithTags("auth"),
-    )
-
-    app.Get("/users/:user_id/profile", handler.GetProfile,
-        autofiber.WithRequestSchema(AuthenticatedRequest{}),
-        autofiber.WithResponseSchema(UserResponse{}),
-        autofiber.WithDescription("Get user profile (authenticated)"),
-        autofiber.WithTags("users", "auth"),
-    )
-
-    app.Listen(":3000")
-}
-```
+- `POST /register` - Parse request → Validate request → Execute handler → Validate response
+- `POST /login-with-validation` - Complete flow with login response validation
+- `GET /users/:user_id` - Smart parsing with response validation
+- `POST /organizations/:org_id/users` - Multi-source parsing with response validation
 
 ## Best Practices
 

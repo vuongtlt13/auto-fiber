@@ -2,6 +2,7 @@
 package autofiber
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,11 +19,31 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 	// Parse body for POST/PUT/PATCH methods
 	method := strings.ToUpper(c.Method())
 	if method == "POST" || method == "PUT" || method == "PATCH" {
-		if err := c.BodyParser(req); err != nil {
-			return &ParseError{
-				Field:   "body",
-				Source:  "body",
-				Message: "Invalid request body: " + err.Error(),
+		contentType := c.Get("Content-Type")
+		if strings.Contains(contentType, "application/json") {
+			// For JSON requests, body is expected
+			if len(c.Body()) == 0 {
+				return &ParseError{
+					Field:   "body",
+					Source:  "body",
+					Message: "Request body is required for JSON requests",
+				}
+			}
+			if err := c.BodyParser(req); err != nil {
+				return &ParseError{
+					Field:   "body",
+					Source:  "body",
+					Message: "Invalid request body: " + err.Error(),
+				}
+			}
+		} else if len(c.Body()) > 0 {
+			// Non-JSON body parsing
+			if err := c.BodyParser(req); err != nil {
+				return &ParseError{
+					Field:   "body",
+					Source:  "body",
+					Message: "Invalid request body: " + err.Error(),
+				}
 			}
 		}
 	}
@@ -223,27 +244,53 @@ func parseFieldFromSource(c *fiber.Ctx, fieldInfo *FieldInfo, fieldValue reflect
 func setFieldValue(field reflect.Value, value interface{}) error {
 	switch field.Kind() {
 	case reflect.String:
-		field.SetString(value.(string))
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if str, ok := value.(string); ok {
+			field.SetString(str)
+		} else {
+			// Convert other types to string
+			field.SetString(fmt.Sprintf("%v", value))
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		switch v := value.(type) {
+		case string:
 			// Parse string to int
-			if intVal, err := parseInt(str); err == nil {
+			if intVal, err := parseInt(v); err == nil {
 				field.SetInt(int64(intVal))
 			} else {
 				return err
 			}
+		case int, int8, int16, int32, int64:
+			// Direct int assignment
+			field.SetInt(int64(v.(int)))
+		case float64:
+			// Handle JSON numbers that might be float64
+			field.SetInt(int64(v))
+		default:
+			return fmt.Errorf("cannot convert %v to int", value)
 		}
 	case reflect.Bool:
-		if str, ok := value.(string); ok {
-			field.SetBool(str == "true" || str == "1")
+		switch v := value.(type) {
+		case string:
+			field.SetBool(v == "true" || v == "1")
+		case bool:
+			field.SetBool(v)
+		default:
+			return fmt.Errorf("cannot convert %v to bool", value)
 		}
 	case reflect.Float32, reflect.Float64:
-		if str, ok := value.(string); ok {
-			if floatVal, err := parseFloat(str); err == nil {
+		switch v := value.(type) {
+		case string:
+			if floatVal, err := parseFloat(v); err == nil {
 				field.SetFloat(floatVal)
 			} else {
 				return err
 			}
+		case float64:
+			field.SetFloat(v)
+		case int, int8, int16, int32, int64:
+			field.SetFloat(float64(v.(int)))
+		default:
+			return fmt.Errorf("cannot convert %v to float", value)
 		}
 	}
 	return nil

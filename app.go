@@ -9,31 +9,43 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// AutoFiberOption is a function type for configuring AutoFiber options
+type AutoFiberOption func(*AutoFiber)
+
+// WithOpenAPI sets the OpenAPI info for the documentation (no server info).
+func WithOpenAPI(info OpenAPIInfo) AutoFiberOption {
+	return func(af *AutoFiber) {
+		af.docsGenerator.DocsInfo = &info
+	}
+}
+
 // AutoFiber is the main application struct for building APIs with automatic parsing, validation, and documentation.
 type AutoFiber struct {
 	App           *fiber.App
 	docsGenerator *DocsGenerator
 	validator     *validator.Validate
-	docsInfo      *OpenAPIInfo
-	docsServers   []OpenAPIServer
 }
 
-// New creates a new AutoFiber application instance with default configuration.
-func New(config ...fiber.Config) *AutoFiber {
-	app := fiber.New(config...)
-	return &AutoFiber{
-		App:           app,
-		docsGenerator: NewDocsGenerator(""),
+// New creates a new AutoFiber application instance with custom options.
+func New(config fiber.Config, options ...AutoFiberOption) *AutoFiber {
+	af := &AutoFiber{
+		App:           fiber.New(config),
+		docsGenerator: NewDocsGenerator(),
 		validator:     validator.New(),
 	}
+	for _, option := range options {
+		option(af)
+	}
+	return af
 }
 
 // Group creates a new route group with the given prefix.
 func (af *AutoFiber) Group(prefix string, handlers ...fiber.Handler) *AutoFiberGroup {
 	group := af.App.Group(prefix, handlers...)
 	return &AutoFiberGroup{
-		Group: group.(*fiber.Group),
-		app:   af,
+		Group:  group.(*fiber.Group),
+		app:    af,
+		Prefix: prefix,
 	}
 }
 

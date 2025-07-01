@@ -13,7 +13,7 @@ import (
 
 // testAutoParseRequest is a helper function to test AutoFiber with proper method registration
 func testAutoParseRequest(t *testing.T, schema interface{}, handler interface{}, req *http.Request) *http.Response {
-	af := autofiber.New()
+	af := autofiber.New(fiber.Config{})
 
 	// Determine HTTP method from request
 	method := req.Method
@@ -62,8 +62,8 @@ func TestAutoParseRequest_ParseFromQuery(t *testing.T) {
 		Age  string `parse:"query:age"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?name=John&age=25", nil)
@@ -77,9 +77,9 @@ func TestAutoParseRequest_ParseFromPath(t *testing.T) {
 		Name string `parse:"query:name"`
 	}
 
-	app := autofiber.New()
-	app.Get("/users/:id", func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	app := autofiber.New(fiber.Config{})
+	app.Get("/users/:id", func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}, autofiber.WithRequestSchema(&Req{}))
 
 	req := httptest.NewRequest(http.MethodGet, "/users/123?name=John", nil)
@@ -94,8 +94,8 @@ func TestAutoParseRequest_ParseFromHeader(t *testing.T) {
 		UserAgent string `parse:"header:User-Agent"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -112,8 +112,8 @@ func TestAutoParseRequest_ParseFromBody(t *testing.T) {
 		Email string `json:"email"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -161,8 +161,8 @@ func TestAutoParseRequest_WithValidation_ValidData(t *testing.T) {
 		Email string `parse:"query:email" validate:"required,email"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?name=John&age=25&email=john@example.com", nil)
@@ -176,8 +176,8 @@ func TestAutoParseRequest_WithValidation_MissingRequiredField(t *testing.T) {
 		Age  int    `parse:"query:age" validate:"required"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	// Missing 'age' field
@@ -192,8 +192,8 @@ func TestAutoParseRequest_WithValidation_InvalidEmail(t *testing.T) {
 		Email string `parse:"query:email" validate:"required,email"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	// Invalid email format
@@ -208,8 +208,8 @@ func TestAutoParseRequest_WithValidation_AgeBelowMinimum(t *testing.T) {
 		Age int `parse:"query:age" validate:"required,min=18"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	// Age below minimum
@@ -227,8 +227,8 @@ func TestAutoParseRequest_WithValidation_ComplexRules(t *testing.T) {
 		Email    string `parse:"query:email" validate:"required,email"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	// Valid data
@@ -245,8 +245,8 @@ func TestAutoParseRequest_WithValidation_ComplexRules_InvalidData(t *testing.T) 
 		Email    string `parse:"query:email" validate:"required,email"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
-		return c.JSON(req)
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return req, nil
 	}
 
 	// Invalid data: short username, short password, invalid age, invalid email
@@ -280,9 +280,9 @@ func TestAutoParseRequest_ParseTag_Query(t *testing.T) {
 		Name string `parse:"query:name" validate:"required"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
 		assert.Equal(t, "John", req.Name)
-		return c.JSON(req)
+		return req, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?name=John", nil)
@@ -295,10 +295,10 @@ func TestAutoParseRequest_ParseTag_Path(t *testing.T) {
 		ID string `parse:"path:id" validate:"required"`
 	}
 
-	app := autofiber.New()
-	app.Get("/user/:id", func(c *fiber.Ctx, req *Req) error {
+	app := autofiber.New(fiber.Config{})
+	app.Get("/user/:id", func(c *fiber.Ctx, req *Req) (interface{}, error) {
 		assert.Equal(t, "42", req.ID)
-		return c.JSON(req)
+		return req, nil
 	}, autofiber.WithRequestSchema(&Req{}))
 
 	req := httptest.NewRequest(http.MethodGet, "/user/42", nil)
@@ -315,9 +315,9 @@ func TestAutoParseRequest_JsonTag_Query(t *testing.T) {
 		Age int `json:"age" validate:"required"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
 		assert.Equal(t, 30, req.Age)
-		return c.JSON(req)
+		return req, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?age=30", nil)
@@ -330,9 +330,9 @@ func TestAutoParseRequest_JsonTag_Body(t *testing.T) {
 		Email string `json:"email" validate:"required,email"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
 		assert.Equal(t, "a@b.com", req.Email)
-		return c.JSON(req)
+		return req, nil
 	}
 
 	body := `{"email":"a@b.com"}`
@@ -351,9 +351,9 @@ func TestAutoParseRequest_NoTag_FieldName_Query(t *testing.T) {
 		Username string `validate:"required"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
 		assert.Equal(t, "abc", req.Username)
-		return c.JSON(req)
+		return req, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?Username=abc", nil)
@@ -369,9 +369,9 @@ func TestAutoParseRequest_NoTag_FieldName_RequiredError(t *testing.T) {
 		Username string `validate:"required"`
 	}
 
-	handler := func(c *fiber.Ctx, req *Req) error {
+	handler := func(c *fiber.Ctx, req *Req) (interface{}, error) {
 		// This should not be called due to validation error
-		return c.SendStatus(500)
+		return nil, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil) // Không truyền Username
@@ -390,15 +390,15 @@ func TestValidateAndJSON_ValidData(t *testing.T) {
 		Email string `json:"email" validate:"required,email"`
 	}
 
-	app := autofiber.New()
-	app.Get("/", func(c *fiber.Ctx) error {
-		data := &ValidResponse{
+	app := autofiber.New(fiber.Config{})
+	app.Get("/", func(c *fiber.Ctx) (interface{}, error) {
+		response := &ValidResponse{
 			ID:    1,
 			Name:  "John Doe",
 			Email: "john@example.com",
 		}
-		return autofiber.ValidateAndJSON(c, data)
-	})
+		return response, nil
+	}, autofiber.WithResponseSchema(&ValidResponse{}))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	resp, err := app.Test(req)
@@ -407,13 +407,14 @@ func TestValidateAndJSON_ValidData(t *testing.T) {
 }
 
 func TestValidateAndJSON_MapData(t *testing.T) {
-	app := autofiber.New()
-	app.Get("/", func(c *fiber.Ctx) error {
-		data := fiber.Map{
-			"message": "Hello World",
-			"status":  "success",
+	app := autofiber.New(fiber.Config{})
+	app.Get("/", func(c *fiber.Ctx) (interface{}, error) {
+		data := map[string]interface{}{
+			"id":    1,
+			"name":  "John Doe",
+			"email": "john@example.com",
 		}
-		return autofiber.ValidateAndJSON(c, data)
+		return data, nil
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -480,4 +481,85 @@ func TestRequestAndResponseValidation_InvalidRequest(t *testing.T) {
 
 	resp := testAutoParseRequest(t, &Request{}, handler, req)
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+}
+
+func TestValidateAndJSON_WithResponseValidation(t *testing.T) {
+	app := autofiber.New(fiber.Config{})
+
+	type ValidResponse struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+
+	app.Get("/test", func(c *fiber.Ctx) (interface{}, error) {
+		// Set up response validation
+		c.Locals("response_schema", ValidResponse{})
+		c.Locals("response_validator", autofiber.GetValidator())
+
+		// Test with valid response data
+		err := autofiber.ValidateAndJSON(c, ValidResponse{
+			ID:   1,
+			Name: "test",
+		})
+		return nil, err
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestValidateAndJSON_WithInvalidResponse(t *testing.T) {
+	app := autofiber.New(fiber.Config{})
+
+	type ValidResponse struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+
+	app.Get("/test", func(c *fiber.Ctx) (interface{}, error) {
+		// Set up response validation
+		c.Locals("response_schema", ValidResponse{})
+		c.Locals("response_validator", autofiber.GetValidator())
+
+		// Test with invalid response data (missing required fields)
+		err := autofiber.ValidateAndJSON(c, ValidResponse{
+			ID: 1,
+			// Name is missing
+		})
+		return nil, err
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+func TestValidateAndJSON_WithMapDataAndValidation(t *testing.T) {
+	app := autofiber.New(fiber.Config{})
+
+	type ValidResponse struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+
+	app.Get("/test", func(c *fiber.Ctx) (interface{}, error) {
+		// Set up response validation
+		c.Locals("response_schema", ValidResponse{})
+		c.Locals("response_validator", autofiber.GetValidator())
+
+		// Test with map data that should be validated
+		err := autofiber.ValidateAndJSON(c, fiber.Map{
+			"id":   1,
+			"name": "test",
+		})
+		return nil, err
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
