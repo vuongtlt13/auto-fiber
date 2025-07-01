@@ -291,6 +291,73 @@ func TestSchemaGeneration_ComplexTypes(t *testing.T) {
 }
 
 // =============================================================================
+// SCHEMA NAME GENERATION TESTS
+// =============================================================================
+
+func TestGetSchemaName_RFC3986Compliant(t *testing.T) {
+	type User struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+
+	type UserList struct {
+		Users []User `json:"users"`
+	}
+
+	type APIResponse[T any] struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    T      `json:"data"`
+	}
+
+	// Case 1: Simple struct
+	name := autofiber.GetSchemaName(User{})
+	assert.Equal(t, "User", name)
+
+	// Case 2: Generic struct with User
+	name = autofiber.GetSchemaName(APIResponse[User]{})
+	assert.Equal(t, "APIResponse_User", name)
+
+	// Case 3: Generic struct with UserList
+	name = autofiber.GetSchemaName(APIResponse[UserList]{})
+	assert.Equal(t, "APIResponse_UserList", name)
+
+	// Case 4: No special characters in name
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			t.Errorf("Schema name contains invalid character: %c", c)
+		}
+	}
+}
+
+func TestGetSchemaName_GenericAndNonGeneric(t *testing.T) {
+	type User struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+
+	type LoginResponse struct {
+		Token     string    `json:"token"`
+		User      User      `json:"user"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+
+	type APIResponse[T any] struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    T      `json:"data"`
+	}
+
+	// Non-generic struct should not append field type
+	name := autofiber.GetSchemaName(LoginResponse{})
+	assert.Equal(t, "LoginResponse", name)
+
+	// Generic struct should append field type
+	name = autofiber.GetSchemaName(APIResponse[User]{})
+	assert.Equal(t, "APIResponse_User", name)
+}
+
+// =============================================================================
 // INTEGRATION TESTS
 // =============================================================================
 
@@ -455,4 +522,72 @@ func TestGenerateParametersAndBodyWithSecurity_Complex(t *testing.T) {
 		// Should have security
 		assert.NotEmpty(t, path.Put.Security)
 	}
+}
+
+func TestGenerateOperationID_Simple(t *testing.T) {
+	id := autofiber.GenerateOperationID("POST", "/auth/register", nil)
+	assert.Equal(t, "post_auth_register", id)
+
+	id = autofiber.GenerateOperationID("GET", "/users/:user_id", nil)
+	assert.Equal(t, "get_users_user_id", id)
+
+	id = autofiber.GenerateOperationID("DELETE", "/api/v1/items/:item_id", nil)
+	assert.Equal(t, "delete_api_v1_items_item_id", id)
+}
+
+func TestOpenAPISpec_GET_NoRequestBody(t *testing.T) {
+	type GetUserRequest struct {
+		UserID int    `parse:"auto:user_id" validate:"required"`
+		Name   string `json:"name"`
+	}
+
+	app := autofiber.New(fiber.Config{})
+	app.Get("/users/:user_id", func(c *fiber.Ctx, req *GetUserRequest) (interface{}, error) {
+		return req, nil
+	}, autofiber.WithRequestSchema(GetUserRequest{}))
+
+	spec := app.GetOpenAPISpec()
+	path, exists := spec.Paths["/users/{user_id}"]
+	assert.True(t, exists)
+	assert.NotNil(t, path.Get)
+	assert.Nil(t, path.Get.RequestBody, "GET operation must not have requestBody in OpenAPI spec")
+}
+
+func TestOpenAPISpec_NoRequestBody_ForGET_DELETE_HEAD_OPTIONS(t *testing.T) {
+	type Req struct {
+		ID   int    `parse:"auto:id" validate:"required"`
+		Name string `json:"name"`
+	}
+
+	app := autofiber.New(fiber.Config{})
+	app.Get("/test-get/:id", func(c *fiber.Ctx, req *Req) (interface{}, error) { return req, nil }, autofiber.WithRequestSchema(Req{}))
+	app.Delete("/test-delete/:id", func(c *fiber.Ctx, req *Req) (interface{}, error) { return req, nil }, autofiber.WithRequestSchema(Req{}))
+	app.Head("/test-head/:id", func(c *fiber.Ctx, req *Req) (interface{}, error) { return req, nil }, autofiber.WithRequestSchema(Req{}))
+	app.Options("/test-options/:id", func(c *fiber.Ctx, req *Req) (interface{}, error) { return req, nil }, autofiber.WithRequestSchema(Req{}))
+
+	spec := app.GetOpenAPISpec()
+
+	// GET
+	path, exists := spec.Paths["/test-get/{id}"]
+	assert.True(t, exists)
+	assert.NotNil(t, path.Get)
+	assert.Nil(t, path.Get.RequestBody, "GET operation must not have requestBody in OpenAPI spec")
+
+	// DELETE
+	path, exists = spec.Paths["/test-delete/{id}"]
+	assert.True(t, exists)
+	assert.NotNil(t, path.Delete)
+	assert.Nil(t, path.Delete.RequestBody, "DELETE operation must not have requestBody in OpenAPI spec")
+
+	// HEAD
+	path, exists = spec.Paths["/test-head/{id}"]
+	assert.True(t, exists)
+	assert.NotNil(t, path.Head)
+	assert.Nil(t, path.Head.RequestBody, "HEAD operation must not have requestBody in OpenAPI spec")
+
+	// OPTIONS
+	path, exists = spec.Paths["/test-options/{id}"]
+	assert.True(t, exists)
+	assert.NotNil(t, path.Options)
+	assert.Nil(t, path.Options.RequestBody, "OPTIONS operation must not have requestBody in OpenAPI spec")
 }

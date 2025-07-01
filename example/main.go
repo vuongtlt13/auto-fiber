@@ -104,6 +104,22 @@ type LoginResponse struct {
 	ExpiresAt time.Time    `json:"expires_at" validate:"required" description:"Token expiration time"`
 }
 
+// --- Generic APIResponse example ---
+type APIResponse[T any] struct {
+	Code    int    `json:"code" validate:"required"`
+	Message string `json:"message" validate:"required"`
+	Data    T      `json:"data"`
+}
+
+type User struct {
+	ID   int    `json:"id" validate:"required"`
+	Name string `json:"name" validate:"required"`
+}
+
+type UserList struct {
+	Users []User `json:"users" validate:"required"`
+}
+
 // Handler
 type AuthHandler struct{}
 
@@ -228,6 +244,24 @@ func (h *AuthHandler) Health(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok", "timestamp": time.Now()})
 }
 
+// Handler for single user with generic response
+func (h *AuthHandler) GetUserGeneric(c *fiber.Ctx) (interface{}, error) {
+	return APIResponse[User]{
+		Code:    200,
+		Message: "success",
+		Data:    User{ID: 1, Name: "Alice"},
+	}, nil
+}
+
+// Handler for user list with generic response
+func (h *AuthHandler) ListUsersGeneric(c *fiber.Ctx) (interface{}, error) {
+	return APIResponse[UserList]{
+		Code:    200,
+		Message: "success",
+		Data:    UserList{Users: []User{{ID: 1, Name: "Alice"}, {ID: 2, Name: "Bob"}}},
+	}, nil
+}
+
 type UserHandler struct{}
 
 func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (interface{}, error) {
@@ -337,6 +371,16 @@ func main() {
 		autofiber.WithDescription("Register a new user account (with response validation)"),
 		autofiber.WithTags("auth", "user"),
 	)
+	authGroup.Get("/user-generic", handler.GetUserGeneric,
+		autofiber.WithResponseSchema(APIResponse[User]{}),
+		autofiber.WithDescription("Get a single user (generic response)"),
+		autofiber.WithTags("user", "generic"),
+	)
+	authGroup.Get("/users-generic", handler.ListUsersGeneric,
+		autofiber.WithResponseSchema(APIResponse[UserList]{}),
+		autofiber.WithDescription("Get a list of users (generic response)"),
+		autofiber.WithTags("user", "generic"),
+	)
 
 	// Create group for user
 	userGroup := app.Group("/users")
@@ -345,7 +389,7 @@ func main() {
 		autofiber.WithDescription("List users with filtering, pagination, and authentication"),
 		autofiber.WithTags("user", "admin"),
 	)
-	userGroup.Get(":user_id", handler.GetUser,
+	userGroup.Get("/:user_id", handler.GetUser,
 		autofiber.WithRequestSchema(GetUserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
 		autofiber.WithDescription("Get user by ID with smart parsing and response validation"),
@@ -394,5 +438,6 @@ func main() {
 	log.Println("- POST /auth/login-with-validation: Same complete flow with login response")
 	log.Println("- GET /users/:user_id: Smart parsing with response validation")
 	log.Println("- POST /organizations/:org_id/users: Multi-source parsing with response validation")
+	log.Println("Generic response endpoints: /auth/user-generic, /auth/users-generic")
 	app.Listen(":3000")
 }

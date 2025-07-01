@@ -149,7 +149,7 @@ func NewDocsGenerator() *DocsGenerator {
 
 // AddRoute adds a route to the documentation generator with its metadata and options.
 func (dg *DocsGenerator) AddRoute(path, method string, handler interface{}, options *RouteOptions) {
-	operationID := generateOperationID(method, path, handler)
+	operationID := GenerateOperationID(method, path, handler)
 
 	routeInfo := RouteInfo{
 		Path:        path,
@@ -274,7 +274,11 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 	if route.Options != nil && route.Options.RequestSchema != nil {
 		parameters, requestBody, needsBearer := dg.generateParametersAndBodyWithSecurity(route.Options.RequestSchema, route.Path)
 		operation.Parameters = parameters
-		operation.RequestBody = requestBody
+		// Only allow requestBody for POST, PUT, PATCH
+		methodUpper := strings.ToUpper(route.Method)
+		if requestBody != nil && (methodUpper == "POST" || methodUpper == "PUT" || methodUpper == "PATCH") {
+			operation.RequestBody = requestBody
+		}
 		if needsBearer {
 			operation.Security = []map[string][]string{{"bearerAuth": {}}}
 			hasBearer = true
@@ -464,11 +468,16 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 	// Create request body if there are body fields
 	var requestBody *OpenAPIRequestBody
 	if len(bodyFields) > 0 {
+		// Register the schema as a component and use $ref
+		dg.addSchema(schema)
+		schemaName := GetSchemaName(schema)
 		requestBody = &OpenAPIRequestBody{
 			Required: true,
 			Content: map[string]OpenAPIMediaType{
 				"application/json": {
-					Schema: &bodySchema,
+					Schema: &OpenAPISchema{
+						Ref: "#/components/schemas/" + schemaName,
+					},
 				},
 			},
 		}
@@ -503,23 +512,6 @@ func (dg *DocsGenerator) generatePathParameters(path string) []OpenAPIParameter 
 	return params
 }
 
-// generateRequestBody generates request body from schema (legacy method).
-// This method creates a request body that references a schema component.
-func (dg *DocsGenerator) generateRequestBody(schema interface{}) *OpenAPIRequestBody {
-	schemaName := getSchemaName(schema)
-
-	return &OpenAPIRequestBody{
-		Required: true,
-		Content: map[string]OpenAPIMediaType{
-			"application/json": {
-				Schema: &OpenAPISchema{
-					Ref: fmt.Sprintf("#/components/schemas/%s", schemaName),
-				},
-			},
-		},
-	}
-}
-
 // generateResponses generates responses for the operation including success and error responses.
 // It creates standard 200, 400, and 500 responses with appropriate schemas.
 func (dg *DocsGenerator) generateResponses(route RouteInfo) map[string]OpenAPIResponse {
@@ -532,7 +524,7 @@ func (dg *DocsGenerator) generateResponses(route RouteInfo) map[string]OpenAPIRe
 
 	// Add response schema if provided
 	if route.Options != nil && route.Options.ResponseSchema != nil {
-		schemaName := getSchemaName(route.Options.ResponseSchema)
+		schemaName := GetSchemaName(route.Options.ResponseSchema)
 		successResponse.Content = map[string]OpenAPIMediaType{
 			"application/json": {
 				Schema: &OpenAPISchema{
@@ -580,7 +572,11 @@ func (dg *DocsGenerator) generateResponses(route RouteInfo) map[string]OpenAPIRe
 // addSchema adds a schema to the components section of the OpenAPI specification.
 // It converts the Go struct to an OpenAPI schema and stores it for reference.
 func (dg *DocsGenerator) addSchema(schema interface{}) {
-	schemaName := getSchemaName(schema)
+	schemaName := GetSchemaName(schema)
+	// Avoid duplicate registration
+	if _, exists := dg.schemas[schemaName]; exists {
+		return
+	}
 	openAPISchema := dg.convertToOpenAPISchema(schema)
 	dg.schemas[schemaName] = openAPISchema
 }
@@ -622,8 +618,18 @@ func (dg *DocsGenerator) convertToOpenAPISchema(schema interface{}) OpenAPISchem
 		validateTag := field.Tag.Get("validate")
 		isRequired := strings.Contains(validateTag, "required")
 
+		// Recursively register struct field types (except time.Time)
+		if field.Type.Kind() == reflect.Struct && field.Type != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type).Interface())
+		}
+
 		// Convert field type to OpenAPI schema
-		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
+		var fieldSchema OpenAPISchema
+		if field.Name == "Data" && field.Type.Kind() == reflect.Struct {
+			fieldSchema = dg.convertToOpenAPISchema(reflect.New(field.Type).Elem().Interface())
+		} else {
+			fieldSchema = dg.convertFieldTypeToSchema(field.Type)
+		}
 
 		// Add description from struct tag
 		if desc := field.Tag.Get("description"); desc != "" {
@@ -664,8 +670,11 @@ func (dg *DocsGenerator) convertFieldTypeToSchema(t reflect.Type) OpenAPISchema 
 		if t == reflect.TypeOf(time.Time{}) {
 			return OpenAPISchema{Type: "string", Format: "date-time"}
 		}
-		// Handle other structs
-		schemaName := getSchemaName(reflect.New(t).Interface())
+		// For generic instantiations, inline the schema
+		schemaName := GetSchemaName(reflect.New(t).Interface())
+		if strings.Contains(schemaName, "_") { // crude check for generic
+			return dg.convertToOpenAPISchema(reflect.New(t).Elem().Interface())
+		}
 		return OpenAPISchema{Ref: fmt.Sprintf("#/components/schemas/%s", schemaName)}
 	case reflect.Slice, reflect.Array:
 		itemSchema := dg.convertFieldTypeToSchema(t.Elem())
@@ -689,27 +698,61 @@ func (dg *DocsGenerator) getTagsList() []OpenAPITag {
 	return tags
 }
 
-// generateOperationID generates a unique operation ID for the OpenAPI specification.
-// It combines the HTTP method, path, and handler information to create a unique identifier.
-func generateOperationID(method, path string, handler interface{}) string {
-	handlerName := reflect.TypeOf(handler).String()
-	handlerName = strings.TrimPrefix(handlerName, "func(")
-	handlerName = strings.Split(handlerName, "(")[0]
+// GetSchemaName gets the name of a schema from its Go type.
+// It handles pointer types and returns the underlying type name.
+// For generic structs, it generates a unique name including type parameters (e.g., APIResponse_User).
+func GetSchemaName(schema interface{}) string {
+	t := reflect.TypeOf(schema)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	name := t.Name()
+	// If the type name contains a generic instantiation (e.g., APIResponse[...]), strip the generic part
+	isGeneric := false
+	if idx := strings.Index(name, "["); idx != -1 {
+		name = name[:idx]
+		isGeneric = true
+	}
+	// Only append type names for generic structs
+	if isGeneric && t.NumField() > 0 {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			fieldType := field.Type
+			for fieldType.Kind() == reflect.Ptr || fieldType.Kind() == reflect.Slice || fieldType.Kind() == reflect.Array {
+				fieldType = fieldType.Elem()
+			}
+			if fieldType.Kind() == reflect.Struct && fieldType != reflect.TypeOf(time.Time{}) {
+				baseName := fieldType.Name()
+				if baseName == "" {
+					s := fieldType.String()
+					if idx := strings.LastIndex(s, "."); idx != -1 {
+						s = s[idx+1:]
+					}
+					baseName = s
+				}
+				name += "_" + baseName
+			}
+		}
+	}
+	// Replace any non-alphanumeric or underscore character with underscore
+	var sanitized []rune
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			sanitized = append(sanitized, r)
+		} else {
+			sanitized = append(sanitized, '_')
+		}
+	}
+	return string(sanitized)
+}
 
+// GenerateOperationID generates a unique operation ID for the OpenAPI specification.
+// It combines the HTTP method and path to create a unique identifier (no handler signature).
+func GenerateOperationID(method, path string, handler interface{}) string {
 	// Clean up the path for operation ID
 	cleanPath := strings.ReplaceAll(path, "/", "_")
 	cleanPath = strings.ReplaceAll(cleanPath, ":", "")
 	cleanPath = strings.TrimPrefix(cleanPath, "_")
 
-	return fmt.Sprintf("%s_%s_%s", strings.ToLower(method), cleanPath, handlerName)
-}
-
-// getSchemaName gets the name of a schema from its Go type.
-// It handles pointer types and returns the underlying type name.
-func getSchemaName(schema interface{}) string {
-	t := reflect.TypeOf(schema)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	return t.Name()
+	return fmt.Sprintf("%s_%s", strings.ToLower(method), cleanPath)
 }

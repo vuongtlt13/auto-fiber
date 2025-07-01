@@ -563,3 +563,87 @@ func TestValidateAndJSON_WithMapDataAndValidation(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+func TestWithResponseSchema_GenericAPIResponse(t *testing.T) {
+	type APIResponse[T any] struct {
+		Code    int    `json:"code" validate:"required"`
+		Message string `json:"message" validate:"required"`
+		Data    T      `json:"data"`
+	}
+
+	type User struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+
+	type UserList struct {
+		Users []User `json:"users" validate:"required"`
+	}
+
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Endpoint returning a single user
+	app.Get("/user", func(c *fiber.Ctx) (interface{}, error) {
+		return APIResponse[User]{
+			Code:    200,
+			Message: "success",
+			Data:    User{ID: 1, Name: "Alice"},
+		}, nil
+	}, autofiber.WithResponseSchema(APIResponse[User]{}),
+		autofiber.WithDescription("Get a single user"),
+	)
+
+	// Endpoint returning a list of users
+	app.Get("/users", func(c *fiber.Ctx) (interface{}, error) {
+		return APIResponse[UserList]{
+			Code:    200,
+			Message: "success",
+			Data:    UserList{Users: []User{{ID: 1, Name: "Alice"}}},
+		}, nil
+	}, autofiber.WithResponseSchema(APIResponse[UserList]{}),
+		autofiber.WithDescription("Get a list of users"),
+	)
+
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check /user endpoint
+	userPath, ok := spec.Paths["/user"]
+	assert.True(t, ok)
+	assert.NotNil(t, userPath.Get)
+	userSchema := userPath.Get.Responses["200"].Content["application/json"].Schema
+	assert.NotNil(t, userSchema)
+	// The data field should be of type User
+	if userSchema.Properties != nil {
+		dataSchema, ok := userSchema.Properties["data"]
+		assert.True(t, ok)
+		assert.Equal(t, "object", dataSchema.Type)
+		assert.Contains(t, dataSchema.Properties, "id")
+		assert.Contains(t, dataSchema.Properties, "name")
+	}
+
+	// Check /users endpoint
+	usersPath, ok := spec.Paths["/users"]
+	assert.True(t, ok)
+	assert.NotNil(t, usersPath.Get)
+	usersSchema := usersPath.Get.Responses["200"].Content["application/json"].Schema
+	assert.NotNil(t, usersSchema)
+	// The data field should be of type UserList (with users array)
+	if usersSchema.Properties != nil {
+		dataSchema, ok := usersSchema.Properties["data"]
+		assert.True(t, ok)
+		assert.Equal(t, "object", dataSchema.Type)
+		usersField, ok := dataSchema.Properties["users"]
+		assert.True(t, ok)
+		assert.Equal(t, "array", usersField.Type)
+		assert.NotNil(t, usersField.Items)
+		assert.Equal(t, "object", usersField.Items.Type)
+		assert.Contains(t, usersField.Items.Properties, "id")
+		assert.Contains(t, usersField.Items.Properties, "name")
+	}
+}
