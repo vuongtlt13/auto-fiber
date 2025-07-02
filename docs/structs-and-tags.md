@@ -10,6 +10,7 @@ This guide covers how to create request and response structs for AutoFiber, incl
 - [Parse Tags](#parse-tags)
 - [Validation Tags](#validation-tags)
 - [JSON Tags](#json-tags)
+- [Convert Functions](#convert-functions)
 - [Special Cases](#special-cases)
 - [Best Practices](#best-practices)
 
@@ -804,6 +805,108 @@ func TestCreateUserRequest(t *testing.T) {
             }
         })
     }
+}
+```
+
+## Convert Functions
+
+AutoFiber provides two specialized functions for converting Go structs to OpenAPI schemas with different behaviors for request and response scenarios.
+
+### ConvertRequestToOpenAPISchema
+
+This function converts a Go struct to OpenAPI schema specifically for **request parsing**. It follows these rules:
+
+1. **Parse tags with body source**: Only fields with `parse:"body:..."` tags are included
+2. **JSON tags as fallback**: If no parse tag, only fields with valid `json` tags (not empty, not "-") are included
+3. **Skip fields**: Fields without parse tags and without valid json tags are skipped
+
+#### Example
+
+```go
+type ExampleRequest struct {
+    // ✅ Included: parse tag with body source
+    UserID   int    `parse:"body:user_id" json:"id" validate:"required"`
+    UserName string `parse:"body:user_name" json:"name" validate:"required"`
+
+    // ❌ Skipped: parse tag but not body source
+    Token    string `parse:"header:Authorization" json:"token"`
+    Page     int    `parse:"query:page" json:"page"`
+
+    // ✅ Included: valid json tag (no parse tag)
+    Email    string `json:"email" validate:"required,email"`
+    Password string `json:"password" validate:"required,min=6"`
+
+    // ❌ Skipped: empty json tag
+    SkipMe   string `json:"" validate:"required"`
+    SkipMe2  string `json:"," validate:"required"`
+
+    // ❌ Skipped: no tags
+    NoTags   string
+}
+
+// Usage
+dg := autofiber.NewDocsGenerator()
+schema := dg.ConvertRequestToOpenAPISchema(ExampleRequest{})
+// Result: only user_id, user_name, email, password fields are included
+```
+
+### ConvertResponseToOpenAPISchema
+
+This function converts a Go struct to OpenAPI schema specifically for **response serialization**. It follows these rules:
+
+1. **JSON tags priority**: Fields with `json` tags use the tag name
+2. **CamelCase fallback**: Fields without json tags use camelCase field names
+3. **Skip fields**: Fields with `json:"-"` are skipped
+
+#### Example
+
+```go
+type ExampleResponse struct {
+    // ✅ Included: uses json tag name
+    ID        int       `json:"id" validate:"required"`
+    Name      string    `json:"name" validate:"required"`
+    Email     string    `json:"email" validate:"required,email"`
+    CreatedAt time.Time `json:"created_at" validate:"required"`
+    IsActive  bool      `json:"is_active"`
+
+    // ✅ Included: uses camelCase field name
+    UserType  string // becomes "userType"
+    APIKey    string // becomes "apiKey"
+    HTTPStatus string // becomes "httpStatus"
+
+    // ❌ Skipped: json:"-" tag
+    SkipMe    string `json:"-"`
+}
+
+// Usage
+dg := autofiber.NewDocsGenerator()
+schema := dg.ConvertResponseToOpenAPISchema(ExampleResponse{})
+// Result: id, name, email, created_at, is_active, userType, apiKey, httpStatus fields are included
+```
+
+### When to Use Each Function
+
+- **ConvertRequestToOpenAPISchema**: Use when generating OpenAPI schemas for request bodies, especially when you want to exclude non-body fields (headers, query params, path params)
+- **ConvertResponseToOpenAPISchema**: Use when generating OpenAPI schemas for response bodies, ensuring all serializable fields are included with proper naming
+
+### Integration with AutoFiber
+
+These functions are used internally by AutoFiber when generating OpenAPI documentation. You can also use them directly in your code for custom schema generation:
+
+```go
+func (h *MyHandler) CustomSchemaExample(c *fiber.Ctx) (interface{}, error) {
+    dg := autofiber.NewDocsGenerator()
+
+    // Generate request schema
+    requestSchema := dg.ConvertRequestToOpenAPISchema(MyRequest{})
+
+    // Generate response schema
+    responseSchema := dg.ConvertResponseToOpenAPISchema(MyResponse{})
+
+    return fiber.Map{
+        "request_schema": requestSchema,
+        "response_schema": responseSchema,
+    }, nil
 }
 ```
 

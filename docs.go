@@ -457,17 +457,15 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 			},
 		}
 	} else {
-		// If POST/PUT/PATCH and has request schema, still create an empty object request body for OpenAPI
-		// Helper: guess method from path (currently always returns POST as method info is not in path)
+		// Fallback: if POST/PUT/PATCH and has request schema, use ConvertRequestToOpenAPISchema
 		method := strings.ToUpper(guessMethodFromPath(path))
-		if method == "POST" || method == "PUT" || method == "PATCH" {
+		if (method == "POST" || method == "PUT" || method == "PATCH") && t.Kind() == reflect.Struct {
+			schemaObj := dg.ConvertRequestToOpenAPISchema(schema)
 			requestBody = &OpenAPIRequestBody{
 				Required: true,
 				Content: map[string]OpenAPIMediaType{
 					"application/json": {
-						Schema: &OpenAPISchema{
-							Type: "object",
-						},
+						Schema: &schemaObj,
 					},
 				},
 			}
@@ -568,13 +566,20 @@ func (dg *DocsGenerator) addSchema(schema interface{}) {
 	if _, exists := dg.schemas[schemaName]; exists {
 		return
 	}
-	openAPISchema := dg.ConvertToOpenAPISchema(schema)
+	openAPISchema := dg.ConvertRequestToOpenAPISchema(schema)
 	dg.schemas[schemaName] = openAPISchema
 }
 
 // ConvertToOpenAPISchema converts a Go struct to OpenAPI schema.
 // It analyzes struct fields, their types, tags, and validation rules to create a complete schema.
+// This is a legacy function that defaults to request conversion behavior.
 func (dg *DocsGenerator) ConvertToOpenAPISchema(schema interface{}) OpenAPISchema {
+	return dg.ConvertRequestToOpenAPISchema(schema)
+}
+
+// ConvertRequestToOpenAPISchema converts a Go struct to OpenAPI schema for request parsing.
+// It prioritizes parse tags for field names, falls back to json tags, and handles validation.
+func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenAPISchema {
 	t := reflect.TypeOf(schema)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -593,16 +598,108 @@ func (dg *DocsGenerator) ConvertToOpenAPISchema(schema interface{}) OpenAPISchem
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 
-		// Get JSON tag
+		parseTag := field.Tag.Get("parse")
 		jsonTag := field.Tag.Get("json")
-		if jsonTag == "" || jsonTag == "-" {
+
+		var fieldName string
+		include := false
+
+		if parseTag != "" && parseTag != "-" {
+			// parse tag format: body:data, query:name, etc.
+			parts := strings.SplitN(parseTag, ",", 2)
+			sourceKey := strings.SplitN(parts[0], ":", 2)
+			if len(sourceKey) == 2 {
+				source := sourceKey[0]
+				key := sourceKey[1]
+				if source == "body" {
+					fieldName = key
+					include = true
+				}
+			}
+		} else if jsonTag != "" && jsonTag != "-" {
+			// If there is no parse tag, only include if there is a valid json tag
+			fieldName = strings.Split(jsonTag, ",")[0]
+			if fieldName == "" {
+				// If json tag is empty or only comma, skip this field
+				continue
+			}
+			include = true
+		}
+
+		if !include {
 			continue
 		}
 
-		// Parse JSON tag
-		jsonName := strings.Split(jsonTag, ",")[0]
-		if jsonName == "" {
-			jsonName = field.Name
+		validateTag := field.Tag.Get("validate")
+		isRequired := strings.Contains(validateTag, "required")
+
+		// Recursively register struct field types (except time.Time)
+		if field.Type.Kind() == reflect.Struct && field.Type != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type).Interface())
+		}
+		// Also register pointer to struct types
+		if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct && field.Type.Elem() != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type.Elem()).Interface())
+		}
+
+		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
+
+		if desc := field.Tag.Get("description"); desc != "" {
+			fieldSchema.Description = desc
+		}
+		if example := field.Tag.Get("example"); example != "" {
+			fieldSchema.Example = example
+		}
+
+		openAPISchema.Properties[fieldName] = fieldSchema
+
+		if isRequired {
+			openAPISchema.Required = append(openAPISchema.Required, fieldName)
+		}
+	}
+
+	return openAPISchema
+}
+
+// ConvertResponseToOpenAPISchema converts a Go struct to OpenAPI schema for response serialization.
+// It uses json tags for field names, falls back to camelCase field names, and handles validation.
+func (dg *DocsGenerator) ConvertResponseToOpenAPISchema(schema interface{}) OpenAPISchema {
+	t := reflect.TypeOf(schema)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
+		return OpenAPISchema{Type: "object"}
+	}
+
+	openAPISchema := OpenAPISchema{
+		Type:       "object",
+		Properties: make(map[string]OpenAPISchema),
+		Required:   []string{},
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// Get json tag
+		jsonTag := field.Tag.Get("json")
+
+		// Skip fields with json:"-" tag
+		if jsonTag == "-" {
+			continue
+		}
+
+		// Determine field name: json tag takes priority, then camelCase field name
+		var fieldName string
+		if jsonTag != "" && jsonTag != "-" {
+			fieldName = strings.Split(jsonTag, ",")[0]
+			if fieldName == "" {
+				fieldName = toCamelCase(field.Name)
+			}
+		} else {
+			// Convert field name to camelCase
+			fieldName = toCamelCase(field.Name)
 		}
 
 		// Get validation tags
@@ -618,7 +715,7 @@ func (dg *DocsGenerator) ConvertToOpenAPISchema(schema interface{}) OpenAPISchem
 			dg.addSchema(reflect.New(field.Type.Elem()).Interface())
 		}
 
-		// Convert field type to OpenAPI schema (no hardcode for 'Data')
+		// Convert field type to OpenAPI schema
 		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 
 		// Add description from struct tag
@@ -631,14 +728,39 @@ func (dg *DocsGenerator) ConvertToOpenAPISchema(schema interface{}) OpenAPISchem
 			fieldSchema.Example = example
 		}
 
-		openAPISchema.Properties[jsonName] = fieldSchema
+		openAPISchema.Properties[fieldName] = fieldSchema
 
 		if isRequired {
-			openAPISchema.Required = append(openAPISchema.Required, jsonName)
+			openAPISchema.Required = append(openAPISchema.Required, fieldName)
 		}
 	}
 
 	return openAPISchema
+}
+
+// toCamelCase converts a field name to camelCase
+func toCamelCase(s string) string {
+	if s == "" {
+		return s
+	}
+
+	// Handle common abbreviations and special cases
+	if len(s) <= 2 {
+		return strings.ToLower(s)
+	}
+
+	// Handle common abbreviations
+	abbreviations := []string{"API", "HTTP", "JSON", "URL", "ID", "SQL", "XML", "HTML", "CSS", "JS"}
+	for _, abbr := range abbreviations {
+		if strings.HasPrefix(s, abbr) {
+			// Convert abbreviation to lowercase and keep the rest as is
+			return strings.ToLower(abbr) + s[len(abbr):]
+		}
+	}
+
+	// Convert first character to lowercase
+	result := strings.ToLower(s[:1]) + s[1:]
+	return result
 }
 
 // convertFieldTypeToSchema converts a Go type to OpenAPI schema.
@@ -663,7 +785,7 @@ func (dg *DocsGenerator) convertFieldTypeToSchema(t reflect.Type) OpenAPISchema 
 		// For generic instantiations, inline the schema
 		schemaName := GetSchemaName(reflect.New(t).Interface())
 		if strings.Contains(schemaName, "_") { // crude check for generic
-			return dg.ConvertToOpenAPISchema(reflect.New(t).Elem().Interface())
+			return dg.ConvertRequestToOpenAPISchema(reflect.New(t).Elem().Interface())
 		}
 		return OpenAPISchema{Ref: fmt.Sprintf("#/components/schemas/%s", schemaName)}
 	case reflect.Slice, reflect.Array:

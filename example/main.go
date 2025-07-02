@@ -20,7 +20,7 @@ type RegisterRequest struct {
 	Email     string    `json:"email" validate:"required,email" description:"User email address"`
 	Password  string    `json:"password" validate:"required,min=6" description:"User password"`
 	Name      string    `json:"name" validate:"required" description:"User full name"`
-	BirthDate time.Time `json:"birth_date" description:"User birth date"`
+	BirthDate time.Time `json:"birthDate" description:"User birth date"`
 }
 
 // UserFilterRequest demonstrates parsing from multiple sources using parse tag
@@ -29,23 +29,23 @@ type UserFilterRequest struct {
 	Page     int    `parse:"query:page" validate:"gte=1" description:"Page number" example:"1"`
 	Limit    int    `parse:"query:limit" validate:"gte=1,lte=100" description:"Items per page" example:"10"`
 	Search   string `parse:"query:search" description:"Search term"`
-	SortBy   string `parse:"query:sort_by" description:"Sort field" example:"name"`
-	SortDesc bool   `parse:"query:sort_desc" description:"Sort descending"`
+	SortBy   string `parse:"query:sortBy" description:"Sort field" example:"name"`
+	SortDesc bool   `parse:"query:sortDesc" description:"Sort descending"`
 
 	// Headers
 	Authorization string `parse:"header:Authorization" validate:"required" description:"Bearer token"`
 	Accept        string `parse:"header:Accept" description:"Accept header"`
 
 	// Cookies
-	SessionID string `parse:"cookie:session_id" description:"Session ID from cookie"`
+	SessionID string `parse:"cookie:sessionId" description:"Session ID from cookie"`
 }
 
 // GetUserRequest demonstrates smart parsing (auto-detect source)
 type GetUserRequest struct {
 	// These will be auto-detected based on HTTP method
-	UserID         int  `parse:"auto:user_id" validate:"required" description:"User ID (auto-detected from path/query/body)"`
-	IncludeProfile bool `parse:"auto:include_profile" description:"Include user profile data"`
-	IncludePosts   bool `parse:"auto:include_posts" description:"Include user posts"`
+	UserID         int  `parse:"auto:userId" validate:"required" description:"User ID (auto-detected from path/query/body)"`
+	IncludeProfile bool `parse:"auto:includeProfile" description:"Include user profile data"`
+	IncludePosts   bool `parse:"auto:includePosts" description:"Include user posts"`
 
 	// Headers
 	Authorization string `parse:"header:Authorization" validate:"required" description:"Bearer token"`
@@ -54,7 +54,7 @@ type GetUserRequest struct {
 // Request schema with parse tag and json tag support
 type CreateUserRequest struct {
 	// Path parameter
-	OrgID int `parse:"path:org_id" validate:"required" description:"Organization ID"`
+	OrgID int `parse:"path:orgId" validate:"required" description:"Organization ID"`
 
 	// Query parameters
 	Role     string `parse:"query:role" validate:"required,oneof=admin user" description:"User role"`
@@ -64,9 +64,9 @@ type CreateUserRequest struct {
 	APIKey string `parse:"header:X-API-Key" validate:"required" description:"API key"`
 
 	// Body fields with json tag aliasing
-	Email    string `json:"user_email" parse:"body:email" validate:"required,email" description:"User email"`
-	Password string `json:"user_password" parse:"body:password" validate:"required,min=6" description:"User password"`
-	Name     string `json:"full_name" parse:"body:name" validate:"required" description:"User full name"`
+	Email    string `json:"userEmail" parse:"body:email" validate:"required,email" description:"User email"`
+	Password string `json:"userPassword" parse:"body:password" validate:"required,min=6" description:"User password"`
+	Name     string `json:"fullName" parse:"body:name" validate:"required" description:"User full name"`
 }
 
 // Request schema using only json tag (fallback parsing)
@@ -76,7 +76,7 @@ type SimpleUserRequest struct {
 	Password string `json:"password" validate:"required,min=6" description:"User password"`
 	Name     string `json:"name" validate:"required" description:"User full name"`
 	Age      int    `json:"age" validate:"gte=18" description:"User age"`
-	IsActive bool   `json:"is_active" description:"User active status"`
+	IsActive bool   `json:"isActive" description:"User active status"`
 }
 
 // UserResponse represents user data with validation
@@ -85,9 +85,9 @@ type UserResponse struct {
 	Email     string    `json:"email" validate:"required,email" description:"User email"`
 	Name      string    `json:"name" validate:"required" description:"User name"`
 	Role      string    `json:"role" validate:"required,oneof=admin user" description:"User role"`
-	IsActive  bool      `json:"is_active" description:"User active status"`
-	OrgID     int       `json:"org_id" validate:"required" description:"Organization ID"`
-	CreatedAt time.Time `json:"created_at" validate:"required" description:"Account creation date"`
+	IsActive  bool      `json:"isActive" description:"User active status"`
+	OrgID     int       `json:"orgId" validate:"required" description:"Organization ID"`
+	CreatedAt time.Time `json:"createdAt" validate:"required" description:"Account creation date"`
 }
 
 // ErrorResponse schema for error responses
@@ -101,7 +101,7 @@ type ErrorResponse struct {
 type LoginResponse struct {
 	Token     string       `json:"token" validate:"required" description:"JWT token"`
 	User      UserResponse `json:"user" validate:"required" description:"User information"`
-	ExpiresAt time.Time    `json:"expires_at" validate:"required" description:"Token expiration time"`
+	ExpiresAt time.Time    `json:"expiresAt" validate:"required" description:"Token expiration time"`
 }
 
 // --- Generic APIResponse example ---
@@ -342,6 +342,78 @@ func validateStrongPassword(fl validator.FieldLevel) bool {
 	return hasUpper && hasLower && hasNumber
 }
 
+// Example structs to demonstrate ConvertRequestToOpenAPISchema and ConvertResponseToOpenAPISchema
+type ExampleRequest struct {
+	UserID   int    `parse:"body:userId" json:"userId" validate:"required"`
+	UserName string `parse:"body:userName" json:"userName" validate:"required"`
+	Token    string `parse:"header:authorization" json:"token"`
+	Page     int    `parse:"query:page" json:"page"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=6"`
+	SkipMe   string `json:"" validate:"required"`
+	SkipMe2  string `json:"," validate:"required"`
+	NoTags   string
+}
+
+type ExampleResponse struct {
+	ID         int       `json:"id" validate:"required"`
+	Name       string    `json:"name" validate:"required"`
+	Email      string    `json:"email" validate:"required,email"`
+	CreatedAt  time.Time `json:"createdAt" validate:"required"`
+	IsActive   bool      `json:"isActive"`
+	UserType   string    `json:"userType"`
+	APIKey     string    `json:"apiKey"`
+	HTTPStatus string    `json:"httpStatus"`
+	SkipMe     string    `json:"-"`
+}
+
+// Handler demonstrating the new convert functions
+func (h *UserHandler) ExampleConvertFunctions(c *fiber.Ctx) (interface{}, error) {
+	dg := autofiber.NewDocsGenerator()
+
+	req := ExampleRequest{
+		UserID:   123,
+		UserName: "John Doe",
+		Email:    "john@example.com",
+		Password: "password123",
+	}
+
+	resp := ExampleResponse{
+		ID:         123,
+		Name:       "John Doe",
+		Email:      "john@example.com",
+		CreatedAt:  time.Now(),
+		IsActive:   true,
+		UserType:   "admin",
+		APIKey:     "abc123",
+		HTTPStatus: "200",
+		SkipMe:     "this will be skipped",
+	}
+
+	requestSchema := dg.ConvertRequestToOpenAPISchema(req)
+	responseSchema := dg.ConvertResponseToOpenAPISchema(resp)
+
+	return fiber.Map{
+		"message": "Example of ConvertRequestToOpenAPISchema and ConvertResponseToOpenAPISchema",
+		"request_schema": fiber.Map{
+			"type":       requestSchema.Type,
+			"properties": requestSchema.Properties,
+			"required":   requestSchema.Required,
+		},
+		"response_schema": fiber.Map{
+			"type":       responseSchema.Type,
+			"properties": responseSchema.Properties,
+			"required":   responseSchema.Required,
+		},
+		"explanation": fiber.Map{
+			"request_fields_included":  []string{"userId", "userName", "email", "password"},
+			"request_fields_skipped":   []string{"token", "page", "SkipMe", "SkipMe2", "NoTags"},
+			"response_fields_included": []string{"id", "name", "email", "createdAt", "isActive", "userType", "apiKey", "httpStatus"},
+			"response_fields_skipped":  []string{"SkipMe"},
+		},
+	}, nil
+}
+
 func main() {
 	// Create AutoFiber app with docs configuration
 	app := autofiber.New(
@@ -450,6 +522,12 @@ func main() {
 		},
 		autofiber.WithDescription("Health check endpoint"),
 		autofiber.WithTags("system"),
+	)
+
+	// Add at root
+	app.Get("/schema-convert-example", userHandler.ExampleConvertFunctions,
+		autofiber.WithDescription("Example demonstrating ConvertRequestToOpenAPISchema and ConvertResponseToOpenAPISchema functions"),
+		autofiber.WithTags("example", "convert"),
 	)
 
 	// Serve API documentation

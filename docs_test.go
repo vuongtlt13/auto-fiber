@@ -1050,3 +1050,403 @@ func TestConvertToOpenAPISchema_DebugSchemas(t *testing.T) {
 		t.Error("Expected profile property not found")
 	}
 }
+
+// TestConvertRequestToOpenAPISchema tests the request conversion function
+func TestConvertRequestToOpenAPISchema(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	// Test case: Request struct with parse tags
+	type UserRequest struct {
+		ID     int    `parse:"path:user_id" json:"id" validate:"required"`
+		Name   string `parse:"query:name" json:"name" validate:"required"`
+		Email  string `json:"email" validate:"required,email"`
+		Token  string `parse:"header:Authorization" json:"token"`
+		Page   int    `parse:"query:page" json:"page"`
+		Data   string `parse:"body:data" json:"data"`
+		SkipMe string `json:"-"` // Should be skipped
+		NoTags string // Should be skipped (no parse or json tags)
+	}
+
+	schema := dg.ConvertRequestToOpenAPISchema(UserRequest{})
+
+	// Debug: print actual schema properties
+	t.Logf("Actual schema properties: %v", schema.Properties)
+
+	// Only expect fields with parse tag (body) or valid json tag
+	expectedFields := []string{"data", "email"}
+	for _, field := range expectedFields {
+		if _, exists := schema.Properties[field]; !exists {
+			t.Errorf("Expected field %s not found in schema", field)
+		}
+	}
+
+	// Check that skipped fields are not included
+	skippedFields := []string{"user_id", "name", "token", "page", "SkipMe", "NoTags", "skip_me", "no_tags", "Authorization"}
+	for _, field := range skippedFields {
+		if _, exists := schema.Properties[field]; exists {
+			t.Errorf("Unexpected field %s found in schema", field)
+		}
+	}
+
+	// Check required fields
+	expectedRequired := []string{"email"}
+	for _, req := range expectedRequired {
+		found := false
+		for _, r := range schema.Required {
+			if r == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected required field %s not found", req)
+		}
+	}
+}
+
+// TestConvertResponseToOpenAPISchema tests the response conversion function
+func TestConvertResponseToOpenAPISchema(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	// Test case: Response struct with json tags and camelCase fallback
+	type UserResponse struct {
+		ID        int       `json:"id" validate:"required"`
+		Name      string    `json:"name" validate:"required"`
+		Email     string    `json:"email" validate:"required,email"`
+		CreatedAt time.Time `json:"created_at" validate:"required"`
+		IsActive  bool      `json:"is_active"`
+		UserType  string    // No json tag, should use camelCase
+		APIKey    string    // No json tag, should use camelCase
+		SkipMe    string    `json:"-"` // Should be skipped
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(UserResponse{})
+
+	// Debug: print actual schema properties
+	t.Logf("Actual schema properties: %v", schema.Properties)
+
+	// Check fields with json tags
+	jsonTagFields := map[string]string{
+		"id":         "integer",
+		"name":       "string",
+		"email":      "string",
+		"created_at": "string",
+		"is_active":  "boolean",
+	}
+
+	for field, expectedType := range jsonTagFields {
+		if prop, exists := schema.Properties[field]; exists {
+			if prop.Type != expectedType {
+				t.Errorf("Field %s: expected type %s, got %s", field, expectedType, prop.Type)
+			}
+			// Check format for time.Time fields
+			if field == "created_at" && prop.Format != "date-time" {
+				t.Errorf("Field %s: expected format date-time, got %s", field, prop.Format)
+			}
+		} else {
+			t.Errorf("Expected field %s not found in schema", field)
+		}
+	}
+
+	// Check fields without json tags (should use camelCase)
+	camelCaseFields := map[string]string{
+		"userType": "string",
+		"apiKey":   "string",
+	}
+
+	for field, expectedType := range camelCaseFields {
+		if prop, exists := schema.Properties[field]; exists {
+			if prop.Type != expectedType {
+				t.Errorf("Field %s: expected type %s, got %s", field, expectedType, prop.Type)
+			}
+		} else {
+			t.Errorf("Expected camelCase field %s not found in schema", field)
+		}
+	}
+
+	// Check that skipped fields are not included
+	skippedFields := []string{"SkipMe", "skip_me"}
+	for _, field := range skippedFields {
+		if _, exists := schema.Properties[field]; exists {
+			t.Errorf("Unexpected field %s found in schema", field)
+		}
+	}
+
+	// Check required fields
+	expectedRequired := []string{"id", "name", "email", "created_at"}
+	for _, req := range expectedRequired {
+		found := false
+		for _, r := range schema.Required {
+			if r == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected required field %s not found", req)
+		}
+	}
+}
+
+// TestConvertRequestToOpenAPISchema_ParseTagPriority tests that parse tags take priority over json tags, but only for body source
+func TestConvertRequestToOpenAPISchema_ParseTagPriority(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type TestRequest struct {
+		Field1 string `parse:"body:user_id" json:"id" validate:"required"`
+		Field2 string `parse:"query:search" json:"name" validate:"required"`
+		Field3 string `json:"email" validate:"required"` // Only json tag
+	}
+
+	schema := dg.ConvertRequestToOpenAPISchema(TestRequest{})
+
+	// Only expect fields with parse tag (body) or valid json tag
+	expectedFields := []string{"user_id", "email"}
+	for _, field := range expectedFields {
+		if _, exists := schema.Properties[field]; !exists {
+			t.Errorf("Expected field %s not found in schema", field)
+		}
+	}
+
+	// Fields with parse tag (not body) or no valid tag should be skipped
+	skippedFields := []string{"search", "id", "name"}
+	for _, field := range skippedFields {
+		if _, exists := schema.Properties[field]; exists {
+			t.Errorf("Unexpected field %s found in schema", field)
+		}
+	}
+}
+
+// TestConvertResponseToOpenAPISchema_CamelCase tests camelCase conversion for field names
+func TestConvertResponseToOpenAPISchema_CamelCase(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type TestResponse struct {
+		UserID      string // Should become "userID"
+		APIKey      string // Should become "apiKey"
+		HTTPStatus  string // Should become "httpStatus"
+		JSONData    string // Should become "jsonData"
+		SimpleField string // Should become "simpleField"
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(TestResponse{})
+
+	expectedFields := map[string]string{
+		"userID":      "string",
+		"apiKey":      "string",
+		"httpStatus":  "string",
+		"jsonData":    "string",
+		"simpleField": "string",
+	}
+
+	for field, expectedType := range expectedFields {
+		if prop, exists := schema.Properties[field]; exists {
+			if prop.Type != expectedType {
+				t.Errorf("Field %s: expected type %s, got %s", field, expectedType, prop.Type)
+			}
+		} else {
+			t.Errorf("Expected camelCase field %s not found in schema", field)
+		}
+	}
+}
+
+// TestConvertRequestToOpenAPISchema_EmptyJsonTag tests handling of empty json tags
+func TestConvertRequestToOpenAPISchema_EmptyJsonTag(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type TestRequest struct {
+		Field1 string `json:"" validate:"required"`       // Empty json tag, should be skipped
+		Field2 string `json:"," validate:"required"`      // Empty json tag with comma, should be skipped
+		Field3 string `json:"field3" validate:"required"` // Normal json tag
+		Field4 string `parse:"body:myfield"`              // parse tag body, should be included
+	}
+
+	schema := dg.ConvertRequestToOpenAPISchema(TestRequest{})
+
+	// Only expect fields with parse tag (body) or valid json tag
+	expectedFields := []string{"myfield", "field3"}
+	for _, field := range expectedFields {
+		if _, exists := schema.Properties[field]; !exists {
+			t.Errorf("Expected field %s not found in schema", field)
+		}
+	}
+
+	// Fields with empty json tag should be skipped
+	skippedFields := []string{"Field1", "Field2"}
+	for _, field := range skippedFields {
+		if _, exists := schema.Properties[field]; exists {
+			t.Errorf("Unexpected field %s found in schema", field)
+		}
+	}
+}
+
+// TestConvertResponseToOpenAPISchema_EmptyJsonTag tests handling of empty json tags
+func TestConvertResponseToOpenAPISchema_EmptyJsonTag(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type TestResponse struct {
+		Field1 string `json:""`       // Empty json tag
+		Field2 string `json:","`      // Empty json tag with comma
+		Field3 string `json:"field3"` // Normal json tag
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(TestResponse{})
+
+	// Empty json tags should fall back to camelCase field name
+	expectedFields := map[string]string{
+		"field1": "string",
+		"field2": "string",
+		"field3": "string",
+	}
+
+	for field, expectedType := range expectedFields {
+		if prop, exists := schema.Properties[field]; exists {
+			if prop.Type != expectedType {
+				t.Errorf("Field %s: expected type %s, got %s", field, expectedType, prop.Type)
+			}
+		} else {
+			t.Errorf("Expected field %s not found in schema", field)
+		}
+	}
+}
+
+// TestConvertRequestToOpenAPISchema_ComplexNested tests complex nested structs for request
+func TestConvertRequestToOpenAPISchema_ComplexNested(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Address struct {
+		Street  string `parse:"query:street" json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
+	}
+
+	type UserRequest struct {
+		ID      int      `parse:"path:user_id" json:"id" validate:"required"`
+		Name    string   `parse:"query:name" json:"name" validate:"required"`
+		Address Address  `json:"address" validate:"required"`
+		Profile *Address `json:"profile"`
+	}
+
+	schema := dg.ConvertRequestToOpenAPISchema(UserRequest{})
+
+	// Check that nested structs are registered
+	if _, ok := dg.Schemas()["Address"]; !ok {
+		t.Error("Expected Address schema to be registered in DocsGenerator")
+	}
+
+	// Check that nested structs are referenced
+	if addressProp, exists := schema.Properties["address"]; exists {
+		if addressProp.Ref == "" {
+			t.Error("Expected address field to have a reference to nested schema")
+		}
+	} else {
+		t.Error("Expected address property not found")
+	}
+
+	if profileProp, exists := schema.Properties["profile"]; exists {
+		if profileProp.Ref == "" {
+			t.Error("Expected profile field to have a reference to nested schema")
+		}
+	} else {
+		t.Error("Expected profile property not found")
+	}
+}
+
+// TestConvertResponseToOpenAPISchema_ComplexNested tests complex nested structs for response
+func TestConvertResponseToOpenAPISchema_ComplexNested(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Address struct {
+		Street  string `json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
+	}
+
+	type UserResponse struct {
+		ID      int      `json:"id" validate:"required"`
+		Name    string   `json:"name" validate:"required"`
+		Address Address  `json:"address" validate:"required"`
+		Profile *Address `json:"profile"`
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(UserResponse{})
+
+	// Check that nested structs are registered
+	if _, ok := dg.Schemas()["Address"]; !ok {
+		t.Error("Expected Address schema to be registered in DocsGenerator")
+	}
+
+	// Check that nested structs are referenced
+	if addressProp, exists := schema.Properties["address"]; exists {
+		if addressProp.Ref == "" {
+			t.Error("Expected address field to have a reference to nested schema")
+		}
+	} else {
+		t.Error("Expected address property not found")
+	}
+
+	if profileProp, exists := schema.Properties["profile"]; exists {
+		if profileProp.Ref == "" {
+			t.Error("Expected profile field to have a reference to nested schema")
+		}
+	} else {
+		t.Error("Expected profile property not found")
+	}
+}
+
+func TestOpenAPISpec_RegisterRequestBodySchema(t *testing.T) {
+	app := autofiber.New(fiber.Config{})
+
+	type RegisterRequest struct {
+		Email     string    `json:"email" validate:"required,email"`
+		Password  string    `json:"password" validate:"required,min=6"`
+		Name      string    `json:"name" validate:"required"`
+		BirthDate time.Time `json:"birth_date"`
+	}
+
+	app.Post("/register", func(c *fiber.Ctx, req *RegisterRequest) (interface{}, error) {
+		return req, nil
+	}, autofiber.WithRequestSchema(RegisterRequest{}))
+
+	spec := app.GetOpenAPISpec()
+	path, exists := spec.Paths["/register"]
+	if !exists || path == (autofiber.OpenAPIPath{}) || path.Post == nil {
+		t.Fatal("POST /register not found in OpenAPI spec")
+	}
+	requestBody := path.Post.RequestBody
+	if requestBody == nil {
+		t.Fatal("RequestBody for POST /register is nil")
+	}
+	media, ok := requestBody.Content["application/json"]
+	if !ok {
+		t.Fatal("application/json content not found in requestBody")
+	}
+	schema := media.Schema
+	if schema == nil {
+		t.Fatal("Schema for requestBody is nil")
+	}
+	if schema.Type != "object" {
+		t.Errorf("Expected schema type 'object', got '%s'", schema.Type)
+	}
+	// Check properties
+	expectedFields := []string{"email", "password", "name", "birth_date"}
+	for _, field := range expectedFields {
+		if _, ok := schema.Properties[field]; !ok {
+			t.Errorf("Expected field '%s' in request body schema", field)
+		}
+	}
+	// Check required fields
+	expectedRequired := []string{"email", "password", "name"}
+	for _, req := range expectedRequired {
+		found := false
+		for _, r := range schema.Required {
+			if r == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected required field '%s' in request body schema", req)
+		}
+	}
+}
