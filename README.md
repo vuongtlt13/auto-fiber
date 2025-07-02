@@ -172,11 +172,16 @@ Parse Request → Validate Request → Execute Handler → Validate Response →
 
 ## Handler Signatures
 
-**Recommended:**
+**Required Signatures for AutoFiber:**
 
 ```go
-// Standard handler: return data and error, AutoFiber will marshal JSON automatically
+// Standard handler with request parsing: return data and error
 func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
+    return ResponseSchema{...}, nil
+}
+
+// Handler without request parsing: return data and error
+func (h *Handler) SimpleHandler(c *fiber.Ctx) (interface{}, error) {
     return ResponseSchema{...}, nil
 }
 ```
@@ -189,14 +194,16 @@ func (h *Handler) Health(c *fiber.Ctx) error {
 }
 ```
 
-**NOT recommended:**
+**NOT supported (will cause panic):**
 
 ```go
-// Do not call c.JSON manually if you already have a request schema
+// Do not use this signature - AutoFiber requires (interface{}, error) return
 func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
     return c.JSON(...)
 }
 ```
+
+> **Note:** AutoFiber requires handlers to return `(interface{}, error)` for automatic JSON marshaling and response validation. The old signature `func(c *fiber.Ctx, req *T) error` is no longer supported.
 
 ## Documentation
 
@@ -204,6 +211,7 @@ func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
 - [docs/structs-and-tags.md](docs/structs-and-tags.md) - Struct/tag/validation best practices
 - [docs/complete-flow.md](docs/complete-flow.md) - Full request/response flow
 - [docs/validation-rules.md](docs/validation-rules.md) - Validation rules & custom validators
+- [docs/migration-guide.md](docs/migration-guide.md) - Migrate from old handler signatures
 - [example/](example/) - Example app
 
 ## Contributing

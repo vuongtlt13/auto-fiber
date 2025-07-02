@@ -345,96 +345,73 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 			jsonName = field.Name
 		}
 
-		// Convert field type to OpenAPI schema
-		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
-
-		// Add description and example
-		if desc := field.Tag.Get("description"); desc != "" {
-			fieldSchema.Description = desc
-		}
-		if example := field.Tag.Get("example"); example != "" {
-			fieldSchema.Example = example
-		}
-
-		if parseTag == "" {
-			// No parse tag - assume it's a body field (matching middleware behavior)
-			if bodySchema.Properties == nil {
-				bodySchema = OpenAPISchema{
-					Type:       "object",
-					Properties: make(map[string]OpenAPISchema),
-					Required:   []string{},
-				}
-			}
-			bodySchema.Properties[jsonName] = fieldSchema
-			bodyFields = append(bodyFields, jsonName)
-			handledFields[jsonName] = true
-			continue
-		}
-
-		// Parse the parse tag
-		parts := strings.Split(parseTag, ",")
-		sourcePart := parts[0]
-		sourceKey := strings.Split(sourcePart, ":")
-
-		if len(sourceKey) != 2 {
-			continue
-		}
-
-		source := sourceKey[0]
-		key := sourceKey[1]
-
-		// Check if required
-		required := strings.Contains(parseTag, "required")
+		// Get validation tags
+		validateTag := field.Tag.Get("validate")
+		isRequired := strings.Contains(validateTag, "required")
 
 		handledFields[jsonName] = true
 
+		// Parse the parseTag for source and key
+		var source, key string
+		if parseTag != "" {
+			parts := strings.Split(parseTag, ",")
+			sourcePart := parts[0]
+			sourceKey := strings.SplitN(sourcePart, ":", 2)
+			if len(sourceKey) == 2 {
+				source = sourceKey[0]
+				key = sourceKey[1]
+			} else {
+				source = sourceKey[0]
+				key = jsonName
+			}
+		}
+
 		switch source {
 		case "path":
-			// Path parameters are already handled by generatePathParameters
-			// Just update existing ones with field info
-			for i, param := range parameters {
+			for j, param := range parameters {
 				if param.Name == key {
-					parameters[i].Schema = &fieldSchema
-					parameters[i].Description = fieldSchema.Description
+					fieldSchema := dg.convertFieldTypeToSchema(field.Type)
+					parameters[j].Schema = &fieldSchema
+					parameters[j].Description = field.Tag.Get("description")
 					break
 				}
 			}
 		case "query":
+			fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 			param := OpenAPIParameter{
 				Name:        key,
 				In:          "query",
-				Required:    required,
-				Description: fieldSchema.Description,
+				Required:    isRequired,
+				Description: field.Tag.Get("description"),
 				Schema:      &fieldSchema,
 			}
 			parameters = append(parameters, param)
 		case "header":
-			// Special case: Authorization header -> use security scheme
 			if strings.ToLower(key) == "authorization" {
 				needsBearer = true
-				// Do not add as parameter, will be handled by security
 				continue
 			} else {
+				fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 				param := OpenAPIParameter{
 					Name:        key,
 					In:          "header",
-					Required:    required,
-					Description: fieldSchema.Description,
+					Required:    isRequired,
+					Description: field.Tag.Get("description"),
 					Schema:      &fieldSchema,
 				}
 				parameters = append(parameters, param)
 			}
 		case "cookie":
+			fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 			param := OpenAPIParameter{
 				Name:        key,
 				In:          "cookie",
-				Required:    required,
-				Description: fieldSchema.Description,
+				Required:    isRequired,
+				Description: field.Tag.Get("description"),
 				Schema:      &fieldSchema,
 			}
 			parameters = append(parameters, param)
 		case "body":
-			// Add to body schema
 			if bodySchema.Properties == nil {
 				bodySchema = OpenAPISchema{
 					Type:       "object",
@@ -442,14 +419,12 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 					Required:   []string{},
 				}
 			}
-			bodySchema.Properties[jsonName] = fieldSchema
-			if required {
-				bodySchema.Required = append(bodySchema.Required, jsonName)
+			bodySchema.Properties[key] = dg.convertFieldTypeToSchema(field.Type)
+			if isRequired {
+				bodySchema.Required = append(bodySchema.Required, key)
 			}
-			bodyFields = append(bodyFields, jsonName)
+			bodyFields = append(bodyFields, key)
 		case "auto":
-			// For auto, we need to determine based on HTTP method
-			// This is complex, so we'll add to body for now
 			if bodySchema.Properties == nil {
 				bodySchema = OpenAPISchema{
 					Type:       "object",
@@ -457,11 +432,11 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 					Required:   []string{},
 				}
 			}
-			bodySchema.Properties[jsonName] = fieldSchema
-			if required {
-				bodySchema.Required = append(bodySchema.Required, jsonName)
+			bodySchema.Properties[key] = dg.convertFieldTypeToSchema(field.Type)
+			if isRequired {
+				bodySchema.Required = append(bodySchema.Required, key)
 			}
-			bodyFields = append(bodyFields, jsonName)
+			bodyFields = append(bodyFields, key)
 		}
 	}
 
@@ -480,6 +455,22 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 					},
 				},
 			},
+		}
+	} else {
+		// If POST/PUT/PATCH and has request schema, still create an empty object request body for OpenAPI
+		// Helper: guess method from path (currently always returns POST as method info is not in path)
+		method := strings.ToUpper(guessMethodFromPath(path))
+		if method == "POST" || method == "PUT" || method == "PATCH" {
+			requestBody = &OpenAPIRequestBody{
+				Required: true,
+				Content: map[string]OpenAPIMediaType{
+					"application/json": {
+						Schema: &OpenAPISchema{
+							Type: "object",
+						},
+					},
+				},
+			}
 		}
 	}
 
@@ -623,13 +614,8 @@ func (dg *DocsGenerator) convertToOpenAPISchema(schema interface{}) OpenAPISchem
 			dg.addSchema(reflect.New(field.Type).Interface())
 		}
 
-		// Convert field type to OpenAPI schema
-		var fieldSchema OpenAPISchema
-		if field.Name == "Data" && field.Type.Kind() == reflect.Struct {
-			fieldSchema = dg.convertToOpenAPISchema(reflect.New(field.Type).Elem().Interface())
-		} else {
-			fieldSchema = dg.convertFieldTypeToSchema(field.Type)
-		}
+		// Convert field type to OpenAPI schema (no hardcode for 'Data')
+		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 
 		// Add description from struct tag
 		if desc := field.Tag.Get("description"); desc != "" {
@@ -755,4 +741,10 @@ func GenerateOperationID(method, path string, handler interface{}) string {
 	cleanPath = strings.TrimPrefix(cleanPath, "_")
 
 	return fmt.Sprintf("%s_%s", strings.ToLower(method), cleanPath)
+}
+
+// Helper: guess method from path (currently always returns POST as method info is not in path)
+func guessMethodFromPath(path string) string {
+	// Không có thông tin method trong path, trả về POST mặc định
+	return "POST"
 }

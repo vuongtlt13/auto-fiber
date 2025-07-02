@@ -9,6 +9,7 @@ Welcome to the AutoFiber documentation! This directory contains comprehensive gu
 - **[Structs and Tags Guide](structs-and-tags.md)** - Complete guide to creating request/response structs with parsing tags, validation tags, and best practices
 - **[Complete Request/Response Flow](complete-flow.md)** - Detailed explanation of the complete flow: Parse Request → Validate Request → Execute Handler → Validate Response → Return JSON
 - **[Validation Rules and Best Practices](validation-rules.md)** - Comprehensive guide to validation rules, custom validators, and validation patterns
+- **[Migration Guide](migration-guide.md)** - Guide to migrate from old handler signatures to new required signatures
 
 ### Quick Navigation
 
@@ -18,6 +19,7 @@ Welcome to the AutoFiber documentation! This directory contains comprehensive gu
 | **Structs & Tags**  | How to create request/response structs        | [structs-and-tags.md](structs-and-tags.md) |
 | **Complete Flow**   | Understanding the full request/response cycle | [complete-flow.md](complete-flow.md)       |
 | **Validation**      | Validation rules and custom validators        | [validation-rules.md](validation-rules.md) |
+| **Migration**       | Migrate from old handler signatures           | [migration-guide.md](migration-guide.md)   |
 | **Examples**        | Working examples and patterns                 | [../example/](../example/)                 |
 
 ## 🚀 Quick Start
@@ -46,7 +48,7 @@ If you're new to AutoFiber, start here:
 ### From Complete Flow Guide
 
 - The complete request/response flow in AutoFiber
-- **Recommended handler signature:**
+- **Required handler signature:**
   ```go
   func (h *Handler) MyEndpoint(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
       // Business logic
@@ -95,6 +97,18 @@ func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{},
         Email:     req.Email,
         Name:      req.Name,
         Role:      req.Role,
+        CreatedAt: time.Now(),
+    }
+    return user, nil
+}
+
+// Handler không có request parsing:
+func (h *Handler) GetUser(c *fiber.Ctx) (interface{}, error) {
+    user := UserResponse{
+        ID:        1,
+        Email:     "user@example.com",
+        Name:      "John Doe",
+        Role:      "user",
         CreatedAt: time.Now(),
     }
     return user, nil
@@ -173,6 +187,31 @@ type ComplexRequest struct {
 ### Request Body Rules
 
 - Only POST, PUT, PATCH methods generate a request body in OpenAPI. GET, DELETE, HEAD, OPTIONS do not, even if a request schema is provided.
+
+## ⚠️ Important Notes
+
+### Handler Signatures
+
+AutoFiber requires specific handler signatures:
+
+```go
+// ✅ Required: With request parsing
+func (h *Handler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
+    return ResponseSchema{...}, nil
+}
+
+// ✅ Required: Without request parsing
+func (h *Handler) GetUser(c *fiber.Ctx) (interface{}, error) {
+    return ResponseSchema{...}, nil
+}
+
+// ❌ NOT supported (will cause panic)
+func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
+    return c.JSON(...)
+}
+```
+
+> **Important:** AutoFiber requires handlers to return `(interface{}, error)` for automatic JSON marshaling and response validation. The old signature `func(c *fiber.Ctx, req *T) error` is no longer supported.
 
 ## 📝 Contributing
 

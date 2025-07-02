@@ -262,6 +262,24 @@ func (h *AuthHandler) ListUsersGeneric(c *fiber.Ctx) (interface{}, error) {
 	}, nil
 }
 
+// Handler for single user with pointer generic response
+func (h *AuthHandler) GetUserPointerGeneric(c *fiber.Ctx) (interface{}, error) {
+	return APIResponse[*User]{
+		Code:    200,
+		Message: "success",
+		Data:    &User{ID: 10, Name: "Pointer Alice"},
+	}, nil
+}
+
+// Handler for single user with pointer to generic response
+func (h *AuthHandler) GetUserPointerToGeneric(c *fiber.Ctx) (interface{}, error) {
+	return &APIResponse[*User]{
+		Code:    200,
+		Message: "success",
+		Data:    &User{ID: 11, Name: "Pointer Bob"},
+	}, nil
+}
+
 type UserHandler struct{}
 
 func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (interface{}, error) {
@@ -380,6 +398,16 @@ func main() {
 		autofiber.WithResponseSchema(APIResponse[UserList]{}),
 		autofiber.WithDescription("Get a list of users (generic response)"),
 		autofiber.WithTags("user", "generic"),
+	)
+	authGroup.Get("/user-pointer-generic", handler.GetUserPointerGeneric,
+		autofiber.WithResponseSchema(APIResponse[*User]{}),
+		autofiber.WithDescription("Get a single user (pointer generic response)"),
+		autofiber.WithTags("user", "generic", "pointer"),
+	)
+	authGroup.Get("/user-pointer-to-generic", handler.GetUserPointerToGeneric,
+		autofiber.WithResponseSchema(&APIResponse[*User]{}),
+		autofiber.WithDescription("Get a single user (pointer to generic response)"),
+		autofiber.WithTags("user", "generic", "pointer"),
 	)
 
 	// Create group for user

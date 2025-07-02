@@ -128,9 +128,9 @@ Validated response is automatically serialized to JSON:
 
 ## Handler Signatures
 
-AutoFiber supports the following handler signatures:
+AutoFiber requires specific handler signatures for proper functionality:
 
-### Recommended: Complete Flow (Request Parsing + Response Validation)
+### Required: Complete Flow (Request Parsing + Response Validation)
 
 ```go
 func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
@@ -145,6 +145,19 @@ func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}
 }
 ```
 
+### Required: Simple Handler (No Request Parsing)
+
+```go
+func (h *Handler) SimpleHandler(c *fiber.Ctx) (interface{}, error) {
+    result := ResponseSchema{
+        ID:   1,
+        Name: "Default User",
+        // ... other fields
+    }
+    return result, nil
+}
+```
+
 ### For Health Check or Custom Response Only
 
 ```go
@@ -153,14 +166,21 @@ func (h *Handler) Health(c *fiber.Ctx) error {
 }
 ```
 
-**Avoid:**
+### ⚠️ NOT Supported (Will Cause Panic)
 
 ```go
-// Do NOT use this pattern for API endpoints with request schema
+// Do NOT use this pattern - AutoFiber requires (interface{}, error) return
 func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
     return c.JSON(...)
 }
+
+// Do NOT use this pattern either
+func (h *Handler) AnotherBadHandler(c *fiber.Ctx, req *RequestSchema) {
+    // No return statement
+}
 ```
+
+> **Important:** AutoFiber requires handlers to return `(interface{}, error)` for automatic JSON marshaling and response validation. The old signature `func(c *fiber.Ctx, req *T) error` is no longer supported and will cause a panic.
 
 ## Response Validation
 

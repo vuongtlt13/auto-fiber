@@ -609,6 +609,28 @@ func TestWithResponseSchema_GenericAPIResponse(t *testing.T) {
 		autofiber.WithDescription("Get a list of users"),
 	)
 
+	// Endpoint returning a single user (pointer generic)
+	app.Get("/user_ptr", func(c *fiber.Ctx) (interface{}, error) {
+		return APIResponse[*User]{
+			Code:    200,
+			Message: "success",
+			Data:    &User{ID: 2, Name: "Bob"},
+		}, nil
+	}, autofiber.WithResponseSchema(APIResponse[*User]{}),
+		autofiber.WithDescription("Get a single user (pointer)"),
+	)
+
+	// Endpoint returning a single user (pointer to generic)
+	app.Get("/user_ptr2", func(c *fiber.Ctx) (interface{}, error) {
+		return &APIResponse[*User]{
+			Code:    200,
+			Message: "success",
+			Data:    &User{ID: 3, Name: "Charlie"},
+		}, nil
+	}, autofiber.WithResponseSchema(&APIResponse[*User]{}),
+		autofiber.WithDescription("Get a single user (pointer to generic)"),
+	)
+
 	spec := app.GetOpenAPISpec()
 	assert.NotNil(t, spec)
 
@@ -645,5 +667,33 @@ func TestWithResponseSchema_GenericAPIResponse(t *testing.T) {
 		assert.Equal(t, "object", usersField.Items.Type)
 		assert.Contains(t, usersField.Items.Properties, "id")
 		assert.Contains(t, usersField.Items.Properties, "name")
+	}
+
+	// Check /user_ptr endpoint
+	userPtrPath, ok := spec.Paths["/user_ptr"]
+	assert.True(t, ok)
+	assert.NotNil(t, userPtrPath.Get)
+	userPtrSchema := userPtrPath.Get.Responses["200"].Content["application/json"].Schema
+	assert.NotNil(t, userPtrSchema)
+	if userPtrSchema.Properties != nil {
+		dataSchema, ok := userPtrSchema.Properties["data"]
+		assert.True(t, ok)
+		assert.Equal(t, "object", dataSchema.Type)
+		assert.Contains(t, dataSchema.Properties, "id")
+		assert.Contains(t, dataSchema.Properties, "name")
+	}
+
+	// Check /user_ptr2 endpoint
+	userPtr2Path, ok := spec.Paths["/user_ptr2"]
+	assert.True(t, ok)
+	assert.NotNil(t, userPtr2Path.Get)
+	userPtr2Schema := userPtr2Path.Get.Responses["200"].Content["application/json"].Schema
+	assert.NotNil(t, userPtr2Schema)
+	if userPtr2Schema.Properties != nil {
+		dataSchema, ok := userPtr2Schema.Properties["data"]
+		assert.True(t, ok)
+		assert.Equal(t, "object", dataSchema.Type)
+		assert.Contains(t, dataSchema.Properties, "id")
+		assert.Contains(t, dataSchema.Properties, "name")
 	}
 }
