@@ -568,13 +568,13 @@ func (dg *DocsGenerator) addSchema(schema interface{}) {
 	if _, exists := dg.schemas[schemaName]; exists {
 		return
 	}
-	openAPISchema := dg.convertToOpenAPISchema(schema)
+	openAPISchema := dg.ConvertToOpenAPISchema(schema)
 	dg.schemas[schemaName] = openAPISchema
 }
 
-// convertToOpenAPISchema converts a Go struct to OpenAPI schema.
+// ConvertToOpenAPISchema converts a Go struct to OpenAPI schema.
 // It analyzes struct fields, their types, tags, and validation rules to create a complete schema.
-func (dg *DocsGenerator) convertToOpenAPISchema(schema interface{}) OpenAPISchema {
+func (dg *DocsGenerator) ConvertToOpenAPISchema(schema interface{}) OpenAPISchema {
 	t := reflect.TypeOf(schema)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -612,6 +612,10 @@ func (dg *DocsGenerator) convertToOpenAPISchema(schema interface{}) OpenAPISchem
 		// Recursively register struct field types (except time.Time)
 		if field.Type.Kind() == reflect.Struct && field.Type != reflect.TypeOf(time.Time{}) {
 			dg.addSchema(reflect.New(field.Type).Interface())
+		}
+		// Also register pointer to struct types
+		if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct && field.Type.Elem() != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type.Elem()).Interface())
 		}
 
 		// Convert field type to OpenAPI schema (no hardcode for 'Data')
@@ -659,7 +663,7 @@ func (dg *DocsGenerator) convertFieldTypeToSchema(t reflect.Type) OpenAPISchema 
 		// For generic instantiations, inline the schema
 		schemaName := GetSchemaName(reflect.New(t).Interface())
 		if strings.Contains(schemaName, "_") { // crude check for generic
-			return dg.convertToOpenAPISchema(reflect.New(t).Elem().Interface())
+			return dg.ConvertToOpenAPISchema(reflect.New(t).Elem().Interface())
 		}
 		return OpenAPISchema{Ref: fmt.Sprintf("#/components/schemas/%s", schemaName)}
 	case reflect.Slice, reflect.Array:
@@ -747,4 +751,8 @@ func GenerateOperationID(method, path string, handler interface{}) string {
 func guessMethodFromPath(path string) string {
 	// Không có thông tin method trong path, trả về POST mặc định
 	return "POST"
+}
+
+func (dg *DocsGenerator) Schemas() map[string]OpenAPISchema {
+	return dg.schemas
 }

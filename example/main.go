@@ -263,7 +263,7 @@ func (h *AuthHandler) ListUsersGeneric(c *fiber.Ctx) (interface{}, error) {
 }
 
 // Handler for single user with pointer generic response
-func (h *AuthHandler) GetUserPointerGeneric(c *fiber.Ctx) (interface{}, error) {
+func (h *AuthHandler) GetUserPointerGeneric(c *fiber.Ctx) (APIResponse[*User], error) {
 	return APIResponse[*User]{
 		Code:    200,
 		Message: "success",
@@ -272,7 +272,7 @@ func (h *AuthHandler) GetUserPointerGeneric(c *fiber.Ctx) (interface{}, error) {
 }
 
 // Handler for single user with pointer to generic response
-func (h *AuthHandler) GetUserPointerToGeneric(c *fiber.Ctx) (interface{}, error) {
+func (h *AuthHandler) GetUserPointerToGeneric(c *fiber.Ctx) (*APIResponse[*User], error) {
 	return &APIResponse[*User]{
 		Code:    200,
 		Message: "success",

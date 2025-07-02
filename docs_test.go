@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -590,4 +591,462 @@ func TestOpenAPISpec_NoRequestBody_ForGET_DELETE_HEAD_OPTIONS(t *testing.T) {
 	assert.True(t, exists)
 	assert.NotNil(t, path.Options)
 	assert.Nil(t, path.Options.RequestBody, "OPTIONS operation must not have requestBody in OpenAPI spec")
+}
+
+// TestConvertToOpenAPISchema_SimpleStruct tests conversion of simple structs
+func TestConvertToOpenAPISchema_SimpleStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	// Test case 1: Simple struct with basic types
+	type SimpleUser struct {
+		ID       int       `json:"id" validate:"required"`
+		Name     string    `json:"name" validate:"required"`
+		Email    string    `json:"email" validate:"required,email"`
+		Age      float64   `json:"age" validate:"gte=0"`
+		IsActive bool      `json:"is_active"`
+		Created  time.Time `json:"created_at" validate:"required"`
+	}
+
+	schema := dg.ConvertToOpenAPISchema(SimpleUser{})
+
+	expected := autofiber.OpenAPISchema{
+		Type: "object",
+		Properties: map[string]autofiber.OpenAPISchema{
+			"id":         {Type: "integer"},
+			"name":       {Type: "string"},
+			"email":      {Type: "string"},
+			"age":        {Type: "number"},
+			"is_active":  {Type: "boolean"},
+			"created_at": {Type: "string", Format: "date-time"},
+		},
+		Required: []string{"id", "name", "email", "created_at"},
+	}
+
+	if !reflect.DeepEqual(schema.Type, expected.Type) {
+		t.Errorf("Expected type %s, got %s", expected.Type, schema.Type)
+	}
+
+	if len(schema.Required) != len(expected.Required) {
+		t.Errorf("Expected %d required fields, got %d", len(expected.Required), len(schema.Required))
+	}
+
+	// Check properties
+	for field, expectedProp := range expected.Properties {
+		if prop, exists := schema.Properties[field]; exists {
+			if prop.Type != expectedProp.Type {
+				t.Errorf("Field %s: expected type %s, got %s", field, expectedProp.Type, prop.Type)
+			}
+			if expectedProp.Format != "" && prop.Format != expectedProp.Format {
+				t.Errorf("Field %s: expected format %s, got %s", field, expectedProp.Format, prop.Format)
+			}
+		} else {
+			t.Errorf("Expected property %s not found", field)
+		}
+	}
+}
+
+// TestConvertToOpenAPISchema_ComplexStruct tests conversion of complex structs with nested structures
+func TestConvertToOpenAPISchema_ComplexStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	// Test case 2: Complex struct with nested structs
+	type Address struct {
+		Street  string `json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
+	}
+
+	type Profile struct {
+		Bio       string `json:"bio"`
+		AvatarURL string `json:"avatar_url"`
+	}
+
+	type ComplexUser struct {
+		ID      int      `json:"id" validate:"required"`
+		Name    string   `json:"name" validate:"required"`
+		Address Address  `json:"address" validate:"required"`
+		Profile *Profile `json:"profile"`
+		Tags    []string `json:"tags"`
+	}
+
+	schema := dg.ConvertToOpenAPISchema(ComplexUser{})
+
+	// Check basic structure
+	if schema.Type != "object" {
+		t.Errorf("Expected type object, got %s", schema.Type)
+	}
+
+	// Check that nested structs are referenced and registered
+	if addressProp, exists := schema.Properties["address"]; exists {
+		if addressProp.Ref == "" {
+			t.Error("Expected address field to have a reference to nested schema")
+		}
+		// Check that Address schema is registered
+		if _, ok := dg.Schemas()["Address"]; !ok {
+			t.Error("Expected Address schema to be registered in DocsGenerator")
+		}
+	} else {
+		t.Error("Expected address property not found")
+	}
+
+	if profileProp, exists := schema.Properties["profile"]; exists {
+		if profileProp.Ref == "" {
+			t.Error("Expected profile field to have a reference to nested schema")
+		}
+		// Check that Profile schema is registered
+		if _, ok := dg.Schemas()["Profile"]; !ok {
+			t.Error("Expected Profile schema to be registered in DocsGenerator")
+		}
+	} else {
+		t.Error("Expected profile property not found")
+	}
+
+	// Check array type
+	if tagsProp, exists := schema.Properties["tags"]; exists {
+		if tagsProp.Type != "array" {
+			t.Errorf("Expected tags to be array type, got %s", tagsProp.Type)
+		}
+		if tagsProp.Items == nil {
+			t.Error("Expected tags array to have items schema")
+		}
+		if tagsProp.Items.Type != "string" {
+			t.Errorf("Expected tags items to be string type, got %s", tagsProp.Items.Type)
+		}
+	} else {
+		t.Error("Expected tags property not found")
+	}
+
+	// Check required fields
+	expectedRequired := []string{"id", "name", "address"}
+	for _, req := range expectedRequired {
+		found := false
+		for _, r := range schema.Required {
+			if r == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected required field %s not found", req)
+		}
+	}
+}
+
+// TestConvertToOpenAPISchema_PointerSimpleStruct tests conversion of pointers to simple structs
+func TestConvertToOpenAPISchema_PointerSimpleStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type SimpleUser struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+
+	schema := dg.ConvertToOpenAPISchema(&SimpleUser{})
+
+	// Should handle pointer the same as direct struct
+	expected := autofiber.OpenAPISchema{
+		Type: "object",
+		Properties: map[string]autofiber.OpenAPISchema{
+			"id":   {Type: "integer"},
+			"name": {Type: "string"},
+		},
+		Required: []string{"id", "name"},
+	}
+
+	if schema.Type != expected.Type {
+		t.Errorf("Expected type %s, got %s", expected.Type, schema.Type)
+	}
+
+	if len(schema.Required) != len(expected.Required) {
+		t.Errorf("Expected %d required fields, got %d", len(expected.Required), len(schema.Required))
+	}
+}
+
+// TestConvertToOpenAPISchema_PointerComplexStruct tests conversion of pointers to complex structs
+func TestConvertToOpenAPISchema_PointerComplexStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Address struct {
+		Street string `json:"street" validate:"required"`
+		City   string `json:"city" validate:"required"`
+	}
+
+	type ComplexUser struct {
+		ID      int      `json:"id" validate:"required"`
+		Name    string   `json:"name" validate:"required"`
+		Address *Address `json:"address" validate:"required"`
+		Tags    []string `json:"tags"`
+	}
+
+	schema := dg.ConvertToOpenAPISchema(&ComplexUser{})
+
+	// Check basic structure
+	if schema.Type != "object" {
+		t.Errorf("Expected type object, got %s", schema.Type)
+	}
+
+	// Check that pointer to nested struct is handled correctly and registered
+	if addressProp, exists := schema.Properties["address"]; exists {
+		if addressProp.Ref == "" {
+			t.Error("Expected address field to have a reference to nested schema")
+		}
+		// Check that Address schema is registered
+		if _, ok := dg.Schemas()["Address"]; !ok {
+			t.Error("Expected Address schema to be registered in DocsGenerator")
+		}
+	} else {
+		t.Error("Expected address property not found")
+	}
+
+	// Check array type
+	if tagsProp, exists := schema.Properties["tags"]; exists {
+		if tagsProp.Type != "array" {
+			t.Errorf("Expected tags to be array type, got %s", tagsProp.Type)
+		}
+		if tagsProp.Items == nil {
+			t.Error("Expected tags array to have items schema")
+		}
+	} else {
+		t.Error("Expected tags property not found")
+	}
+}
+
+// TestConvertToOpenAPISchema_DeepNestedStruct tests conversion of deeply nested structs
+func TestConvertToOpenAPISchema_DeepNestedStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Country struct {
+		Code string `json:"code" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+
+	type City struct {
+		Name    string  `json:"name" validate:"required"`
+		Country Country `json:"country" validate:"required"`
+	}
+
+	type Address struct {
+		Street string `json:"street" validate:"required"`
+		City   City   `json:"city" validate:"required"`
+	}
+
+	type DeepNestedUser struct {
+		ID      int      `json:"id" validate:"required"`
+		Name    string   `json:"name" validate:"required"`
+		Address *Address `json:"address" validate:"required"`
+	}
+
+	schema := dg.ConvertToOpenAPISchema(DeepNestedUser{})
+
+	// Check basic structure
+	if schema.Type != "object" {
+		t.Errorf("Expected type object, got %s", schema.Type)
+	}
+
+	// Check that deeply nested structs are referenced and registered
+	if addressProp, exists := schema.Properties["address"]; exists {
+		if addressProp.Ref == "" {
+			t.Error("Expected address field to have a reference to nested schema")
+		}
+		// Check that Address schema is registered
+		if _, ok := dg.Schemas()["Address"]; !ok {
+			t.Error("Expected Address schema to be registered in DocsGenerator")
+		}
+		// Check that City schema is registered
+		if _, ok := dg.Schemas()["City"]; !ok {
+			t.Error("Expected City schema to be registered in DocsGenerator")
+		}
+		// Check that Country schema is registered
+		if _, ok := dg.Schemas()["Country"]; !ok {
+			t.Error("Expected Country schema to be registered in DocsGenerator")
+		}
+	} else {
+		t.Error("Expected address property not found")
+	}
+
+	// Check required fields
+	expectedRequired := []string{"id", "name", "address"}
+	for _, req := range expectedRequired {
+		found := false
+		for _, r := range schema.Required {
+			if r == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected required field %s not found", req)
+		}
+	}
+}
+
+// TestConvertToOpenAPISchema_WithDescriptionsAndExamples tests conversion with description and example tags
+func TestConvertToOpenAPISchema_WithDescriptionsAndExamples(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type UserWithMetadata struct {
+		ID    int    `json:"id" validate:"required" description:"User unique identifier" example:"123"`
+		Name  string `json:"name" validate:"required" description:"User full name" example:"John Doe"`
+		Email string `json:"email" validate:"required,email" description:"User email address" example:"john@example.com"`
+	}
+
+	schema := dg.ConvertToOpenAPISchema(UserWithMetadata{})
+
+	// Check descriptions and examples
+	if idProp, exists := schema.Properties["id"]; exists {
+		if idProp.Description != "User unique identifier" {
+			t.Errorf("Expected description 'User unique identifier', got '%s'", idProp.Description)
+		}
+		if idProp.Example != "123" {
+			t.Errorf("Expected example '123', got '%v'", idProp.Example)
+		}
+	} else {
+		t.Error("Expected id property not found")
+	}
+
+	if nameProp, exists := schema.Properties["name"]; exists {
+		if nameProp.Description != "User full name" {
+			t.Errorf("Expected description 'User full name', got '%s'", nameProp.Description)
+		}
+		if nameProp.Example != "John Doe" {
+			t.Errorf("Expected example 'John Doe', got '%v'", nameProp.Example)
+		}
+	} else {
+		t.Error("Expected name property not found")
+	}
+}
+
+// TestConvertToOpenAPISchema_NonStructInput tests conversion of non-struct inputs
+func TestConvertToOpenAPISchema_NonStructInput(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	// Test with string
+	schema := dg.ConvertToOpenAPISchema("test")
+	expected := autofiber.OpenAPISchema{Type: "object"}
+	if schema.Type != expected.Type {
+		t.Errorf("Expected type %s for non-struct input, got %s", expected.Type, schema.Type)
+	}
+
+	// Test with int
+	schema = dg.ConvertToOpenAPISchema(123)
+	if schema.Type != expected.Type {
+		t.Errorf("Expected type %s for non-struct input, got %s", expected.Type, schema.Type)
+	}
+
+	// Test with slice
+	schema = dg.ConvertToOpenAPISchema([]string{"test"})
+	if schema.Type != expected.Type {
+		t.Errorf("Expected type %s for non-struct input, got %s", expected.Type, schema.Type)
+	}
+}
+
+// TestConvertToOpenAPISchema_GenericStruct tests conversion of generic structs
+func TestConvertToOpenAPISchema_GenericStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type User struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+
+	type APIResponse[T any] struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    T      `json:"data"`
+	}
+
+	// Test with generic struct
+	response := APIResponse[User]{}
+	schema := dg.ConvertToOpenAPISchema(response)
+
+	// Check basic structure
+	if schema.Type != "object" {
+		t.Errorf("Expected type object, got %s", schema.Type)
+	}
+
+	// Check that data field exists
+	if dataProp, exists := schema.Properties["data"]; exists {
+		// Generic structs should either be inlined or referenced
+		// Both approaches are valid depending on implementation
+		if dataProp.Type != "object" && dataProp.Ref == "" {
+			t.Errorf("Expected data field to be object type or have reference, got type: %s, ref: %s", dataProp.Type, dataProp.Ref)
+		}
+	} else {
+		t.Error("Expected data property not found")
+	}
+
+	// Check that code and message fields exist
+	if codeProp, exists := schema.Properties["code"]; exists {
+		if codeProp.Type != "integer" {
+			t.Errorf("Expected code field to be integer type, got %s", codeProp.Type)
+		}
+	} else {
+		t.Error("Expected code property not found")
+	}
+
+	if messageProp, exists := schema.Properties["message"]; exists {
+		if messageProp.Type != "string" {
+			t.Errorf("Expected message field to be string type, got %s", messageProp.Type)
+		}
+	} else {
+		t.Error("Expected message property not found")
+	}
+}
+
+// TestConvertToOpenAPISchema_DebugSchemas tests to see what schemas are actually registered
+func TestConvertToOpenAPISchema_DebugSchemas(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Address struct {
+		Street  string `json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
+	}
+
+	type Profile struct {
+		Bio       string `json:"bio"`
+		AvatarURL string `json:"avatar_url"`
+	}
+
+	type ComplexUser struct {
+		ID      int      `json:"id" validate:"required"`
+		Name    string   `json:"name" validate:"required"`
+		Address Address  `json:"address" validate:"required"`
+		Profile *Profile `json:"profile"`
+		Tags    []string `json:"tags"`
+	}
+
+	schema := dg.ConvertToOpenAPISchema(ComplexUser{})
+
+	// Print all registered schemas
+	t.Logf("Registered schemas: %+v", dg.Schemas())
+
+	// Print schema names
+	for name := range dg.Schemas() {
+		t.Logf("Schema name: %s", name)
+	}
+
+	// Check basic structure
+	if schema.Type != "object" {
+		t.Errorf("Expected type object, got %s", schema.Type)
+	}
+
+	// Check that nested structs are referenced
+	if addressProp, exists := schema.Properties["address"]; exists {
+		t.Logf("Address prop: %+v", addressProp)
+		if addressProp.Ref == "" {
+			t.Error("Expected address field to have a reference to nested schema")
+		}
+	} else {
+		t.Error("Expected address property not found")
+	}
+
+	if profileProp, exists := schema.Properties["profile"]; exists {
+		t.Logf("Profile prop: %+v", profileProp)
+		if profileProp.Ref == "" {
+			t.Error("Expected profile field to have a reference to nested schema")
+		}
+	} else {
+		t.Error("Expected profile property not found")
+	}
 }
