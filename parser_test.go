@@ -1,8 +1,11 @@
 package autofiber_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -30,7 +33,7 @@ func TestParseSource_Constants(t *testing.T) {
 }
 
 func TestParseFromMultipleSources_EdgeCases(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	type TestRequest struct {
 		ID       int    `parse:"path:id"`
@@ -61,7 +64,7 @@ func TestParseFromMultipleSources_EdgeCases(t *testing.T) {
 }
 
 func TestParseFieldFromSource_ComplexTypes(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	type ComplexRequest struct {
 		IDs      []int                  `parse:"query:ids"`
@@ -84,7 +87,7 @@ func TestParseFieldFromSource_ComplexTypes(t *testing.T) {
 }
 
 func TestSetFieldValue_EdgeCases(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	type EdgeCaseRequest struct {
 		IntField    int     `parse:"query:int"`
@@ -111,7 +114,7 @@ func TestSetFieldValue_EdgeCases(t *testing.T) {
 }
 
 func TestGetSmartSource(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	type SmartRequest struct {
 		ID   int    `parse:"auto:id"`
@@ -142,7 +145,7 @@ func TestGetSmartSource(t *testing.T) {
 }
 
 func TestConvertDefaultValue(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	type DefaultRequest struct {
 		IntField    int     `parse:"query:int" default:"42"`
@@ -169,7 +172,7 @@ func TestConvertDefaultValue(t *testing.T) {
 }
 
 func TestParseFloat(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	type FloatRequest struct {
 		Price float64 `parse:"query:price"`
@@ -191,4 +194,193 @@ func TestParseFloat(t *testing.T) {
 	resp, err = app.Test(req)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestParseEmbeddedStructs_Request(t *testing.T) {
+	app := newTestApp()
+
+	type UserBase struct {
+		Email    string `json:"email" validate:"required,email"`
+		FullName string `json:"fullName" validate:"required"`
+	}
+	type UserInfo struct {
+		UserBase
+		IsActive bool `json:"isActive"`
+	}
+	type UserRequest struct {
+		UserInfo
+		Age int `json:"age"`
+	}
+
+	var parsed *UserRequest
+	app.Post("/embedded", func(c *fiber.Ctx, req *UserRequest) (interface{}, error) {
+		parsed = req
+		return req, nil
+	}, autofiber.WithRequestSchema(&UserRequest{}))
+
+	// Test parsing from JSON body (all embedded fields present)
+	jsonBody := `{"email":"test@example.com","fullName":"Test User","isActive":true,"age":30}`
+	req := httptest.NewRequest(http.MethodPost, "/embedded", bytes.NewReader([]byte(jsonBody)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	if assert.NotNil(t, parsed) {
+		assert.Equal(t, "test@example.com", parsed.Email)
+		assert.Equal(t, "Test User", parsed.FullName)
+		assert.Equal(t, true, parsed.IsActive)
+		assert.Equal(t, 30, parsed.Age)
+	}
+
+	// Test parsing from query string (if using parse tag)
+	type QueryUserBase struct {
+		Email string `parse:"query:email"`
+	}
+	type QueryUserRequest struct {
+		QueryUserBase
+		Age int `parse:"query:age"`
+	}
+	var parsedQuery QueryUserRequest
+	app.Get("/embedded-query", func(c *fiber.Ctx, req *QueryUserRequest) (interface{}, error) {
+		parsedQuery = *req
+		return req, nil
+	}, autofiber.WithRequestSchema(&QueryUserRequest{}))
+
+	req = httptest.NewRequest(http.MethodGet, "/embedded-query?email=abc@xyz.com&age=22", nil)
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "abc@xyz.com", parsedQuery.Email)
+	assert.Equal(t, 22, parsedQuery.Age)
+}
+
+func TestParseEmbeddedPointerStructs_Request(t *testing.T) {
+	app := newTestApp()
+
+	type UserBase struct {
+		Email    string `json:"email"`
+		FullName string `json:"fullName"`
+	}
+	type UserInfo struct {
+		*UserBase
+		IsActive bool `json:"isActive"`
+	}
+	type UserRequest struct {
+		*UserInfo
+		Age int `json:"age"`
+	}
+
+	var parsed *UserRequest
+	app.Post("/embedded-pointer", func(c *fiber.Ctx, req *UserRequest) (interface{}, error) {
+		parsed = req
+		return req, nil
+	}, autofiber.WithRequestSchema(&UserRequest{}))
+
+	// Test parsing from JSON body with all fields present
+	jsonBody := `{"email":"ptr@example.com","fullName":"Pointer User","isActive":true,"age":25}`
+	req := httptest.NewRequest(http.MethodPost, "/embedded-pointer", bytes.NewReader([]byte(jsonBody)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	if assert.NotNil(t, parsed) && assert.NotNil(t, parsed.UserInfo) && assert.NotNil(t, parsed.UserInfo.UserBase) {
+		assert.Equal(t, "ptr@example.com", parsed.UserInfo.UserBase.Email)
+		assert.Equal(t, "Pointer User", parsed.UserInfo.UserBase.FullName)
+		assert.Equal(t, true, parsed.UserInfo.IsActive)
+		assert.Equal(t, 25, parsed.Age)
+	}
+
+	// Test parsing from query string (should also parse into embedded pointer fields)
+	parsed = nil
+	app.Get("/embedded-pointer-query", func(c *fiber.Ctx, req *UserRequest) (interface{}, error) {
+		parsed = req
+		return req, nil
+	}, autofiber.WithRequestSchema(&UserRequest{}))
+
+	req = httptest.NewRequest(http.MethodGet, "/embedded-pointer-query?email=abc@xyz.com&fullName=PointerQuery&isActive=true&age=22", nil)
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	if assert.NotNil(t, parsed) && assert.NotNil(t, parsed.UserInfo) && assert.NotNil(t, parsed.UserInfo.UserBase) {
+		assert.Equal(t, "abc@xyz.com", parsed.UserInfo.UserBase.Email)
+		assert.Equal(t, "PointerQuery", parsed.UserInfo.UserBase.FullName)
+		assert.Equal(t, true, parsed.UserInfo.IsActive)
+		assert.Equal(t, 22, parsed.Age)
+	}
+
+	// Test parsing with missing embedded pointer (should still allocate and parse zero values)
+	parsed = nil
+	jsonBody = `{"isActive":false,"age":10}`
+	req = httptest.NewRequest(http.MethodPost, "/embedded-pointer", bytes.NewReader([]byte(jsonBody)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	if assert.NotNil(t, parsed) && assert.NotNil(t, parsed.UserInfo) && assert.NotNil(t, parsed.UserInfo.UserBase) {
+		assert.Equal(t, "", parsed.UserInfo.UserBase.Email)
+		assert.Equal(t, "", parsed.UserInfo.UserBase.FullName)
+		assert.Equal(t, false, parsed.UserInfo.IsActive)
+		assert.Equal(t, 10, parsed.Age)
+	}
+}
+
+func TestParseEmbeddedPointerStructs_WithValidation(t *testing.T) {
+	app := newTestApp()
+
+	type UserBase struct {
+		Email    string `json:"email" validate:"required,email"`
+		FullName string `json:"fullName" validate:"required"`
+	}
+	type UserInfo struct {
+		*UserBase
+		IsActive bool `json:"isActive"`
+	}
+	type UserRequest struct {
+		*UserInfo
+		Age int `json:"age"`
+	}
+
+	app.Post("/embedded-pointer-validate", func(c *fiber.Ctx, req *UserRequest) (interface{}, error) {
+		return req, nil
+	}, autofiber.WithRequestSchema(&UserRequest{}))
+
+	// Case 1: missing required fields in pointer embedded struct should trigger validation error
+	jsonBody := `{"isActive":true,"age":20}`
+	req := httptest.NewRequest(http.MethodPost, "/embedded-pointer-validate", bytes.NewReader([]byte(jsonBody)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+
+	var respBody map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&respBody)
+	assert.Equal(t, "Validation failed", respBody["error"])
+
+	// Check that details is an array of objects and contains fields for Email and FullName
+	details, ok := respBody["details"].([]interface{})
+	assert.True(t, ok, "details should be an array")
+	foundEmail := false
+	foundFullName := false
+	for _, d := range details {
+		if m, ok := d.(map[string]interface{}); ok {
+			if f, ok := m["field"].(string); ok {
+				if strings.Contains(f, "Email") {
+					foundEmail = true
+				}
+				if strings.Contains(f, "FullName") {
+					foundFullName = true
+				}
+			}
+		}
+	}
+	assert.True(t, foundEmail, "details should mention Email")
+	assert.True(t, foundFullName, "details should mention FullName")
+
+	// Case 2: valid request, should pass validation
+	jsonBody = `{"email":"valid@example.com","fullName":"Valid User","isActive":true,"age":30}`
+	req = httptest.NewRequest(http.MethodPost, "/embedded-pointer-validate", bytes.NewReader([]byte(jsonBody)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

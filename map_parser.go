@@ -37,6 +37,23 @@ func parseFromMapInternal(data map[string]interface{}, schema interface{}) error
 		field := reqType.Field(i)
 		fieldValue := reqValue.Field(i)
 
+		// Handle embedded (anonymous) struct fields recursively
+		if field.Anonymous && (fieldValue.Kind() == reflect.Struct || (fieldValue.Kind() == reflect.Ptr && fieldValue.Type().Elem().Kind() == reflect.Struct)) {
+			if fieldValue.Kind() == reflect.Ptr {
+				if fieldValue.IsNil() {
+					fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
+				}
+				if err := parseFromMapInternal(data, fieldValue.Interface()); err != nil {
+					return fmt.Errorf("embedded field %s: %w", field.Name, err)
+				}
+			} else if fieldValue.CanAddr() {
+				if err := parseFromMapInternal(data, fieldValue.Addr().Interface()); err != nil {
+					return fmt.Errorf("embedded field %s: %w", field.Name, err)
+				}
+			}
+			continue
+		}
+
 		// Get field key from json tag or field name
 		key := getFieldKey(field)
 

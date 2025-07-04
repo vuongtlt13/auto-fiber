@@ -31,7 +31,7 @@ func TestRouteInfo_Struct(t *testing.T) {
 // =============================================================================
 
 func TestAutoFiber_Put(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Put("/users/:id", func(c *fiber.Ctx) (interface{}, error) {
 		return c.JSON(fiber.Map{
@@ -49,7 +49,7 @@ func TestAutoFiber_Put(t *testing.T) {
 }
 
 func TestAutoFiber_Delete(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Delete("/users/:id", func(c *fiber.Ctx) (interface{}, error) {
 		return fiber.Map{
@@ -67,7 +67,7 @@ func TestAutoFiber_Delete(t *testing.T) {
 }
 
 func TestAutoFiber_Patch(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Patch("/users/:id", func(c *fiber.Ctx) (interface{}, error) {
 		return fiber.Map{
@@ -85,7 +85,7 @@ func TestAutoFiber_Patch(t *testing.T) {
 }
 
 func TestAutoFiber_Head(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Head("/users/:id", func(c *fiber.Ctx) (interface{}, error) {
 		c.Set("X-User-ID", c.Params("id"))
@@ -101,7 +101,7 @@ func TestAutoFiber_Head(t *testing.T) {
 }
 
 func TestAutoFiber_Options(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Options("/users", func(c *fiber.Ctx) (interface{}, error) {
 		c.Set("Allow", "GET, POST, PUT, DELETE")
@@ -119,7 +119,7 @@ func TestAutoFiber_Options(t *testing.T) {
 }
 
 func TestAutoFiber_All(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.All("/health", func(c *fiber.Ctx) (interface{}, error) {
 		return fiber.Map{
@@ -159,7 +159,7 @@ func TestAutoFiber_Put_WithRequestSchema(t *testing.T) {
 		Email string `json:"email" validate:"required,email"`
 	}
 
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Put("/users/:id", func(c *fiber.Ctx, req *UpdateUserRequest) (interface{}, error) {
 		return fiber.Map{
@@ -176,7 +176,7 @@ func TestAutoFiber_Put_WithRequestSchema(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode) // Should fail parsing
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestAutoFiber_Delete_WithRequestSchema(t *testing.T) {
@@ -184,7 +184,7 @@ func TestAutoFiber_Delete_WithRequestSchema(t *testing.T) {
 		Reason string `json:"reason" validate:"required"`
 	}
 
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Delete("/users/:id", func(c *fiber.Ctx, req *DeleteUserRequest) (interface{}, error) {
 		return fiber.Map{
@@ -200,7 +200,7 @@ func TestAutoFiber_Delete_WithRequestSchema(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode) // Should fail validation
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 }
 
 // =============================================================================
@@ -208,7 +208,7 @@ func TestAutoFiber_Delete_WithRequestSchema(t *testing.T) {
 // =============================================================================
 
 func TestAutoFiber_Put_WithMiddleware(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	// Custom middleware
 	customMiddleware := func(c *fiber.Ctx) error {
@@ -233,7 +233,7 @@ func TestAutoFiber_Put_WithMiddleware(t *testing.T) {
 }
 
 func TestAutoFiber_Delete_WithMiddleware(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	// Auth middleware
 	authMiddleware := func(c *fiber.Ctx) error {
@@ -283,7 +283,7 @@ func TestAutoFiber_Put_WithResponseSchema(t *testing.T) {
 		Name string `json:"name" validate:"required"`
 	}
 
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	app.Put("/users/:id", func(c *fiber.Ctx, req *UpdateUserRequest) (interface{}, error) {
 		return &UpdateUserResponse{
@@ -299,7 +299,7 @@ func TestAutoFiber_Put_WithResponseSchema(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode) // Should fail parsing
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 // =============================================================================
@@ -307,7 +307,7 @@ func TestAutoFiber_Put_WithResponseSchema(t *testing.T) {
 // =============================================================================
 
 func TestAutoFiber_AllMethods_Integration(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	// Test all HTTP methods
 	app.Get("/test", func(c *fiber.Ctx) (interface{}, error) {
@@ -362,7 +362,7 @@ func TestAutoFiber_ComplexRoute_WithAllOptions(t *testing.T) {
 		Age   int    `json:"age" validate:"gte=18"`
 	}
 
-	app := autofiber.New(fiber.Config{})
+	app := newTestApp()
 
 	// Custom middleware
 	logMiddleware := func(c *fiber.Ctx) error {
@@ -388,5 +388,5 @@ func TestAutoFiber_ComplexRoute_WithAllOptions(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode) // Should fail parsing
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }

@@ -4,6 +4,7 @@ package autofiber
 import (
 	"reflect"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -43,20 +44,40 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 			if err := parseMiddleware(c); err != nil {
 				// Handle parse errors
 				if parseErr, ok := err.(*ParseError); ok {
-					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-						"error":   "Invalid request",
-						"details": parseErr.Error(),
-					})
+					return &ValidationRequestError{
+						Message: "Invalid request",
+						Details: []FieldErrorDetail{{
+							Field:   parseErr.Field,
+							Message: parseErr.Message,
+							Tag:     "parse",
+						}},
+					}
 				}
-				// Handle validation errors
-				return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-					"error":   "Validation failed",
-					"details": err.Error(),
-				})
+
+				// Handle validation errors (from validator)
+				if validationErrs, ok := err.(validator.ValidationErrors); ok {
+					var details []FieldErrorDetail
+					for _, verr := range validationErrs {
+						details = append(details, FieldErrorDetail{
+							Field:   verr.Namespace(),
+							Message: verr.Error(),
+							Tag:     verr.Tag(),
+						})
+					}
+					return &ValidationRequestError{
+						Message: "Validation failed",
+						Details: details,
+					}
+				}
+				// Unknown error
+				return &ValidationRequestError{
+					Message: err.Error(),
+					Details: nil,
+				}
 			}
 			req := c.Locals("parsed_request")
 			if req == nil {
-				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+				return &ValidationRequestError{Message: "Invalid request"}
 			}
 			results := reflect.ValueOf(handler).Call([]reflect.Value{reflect.ValueOf(c), reflect.ValueOf(req)})
 			data := results[0].Interface()

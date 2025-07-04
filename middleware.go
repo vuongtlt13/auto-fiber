@@ -8,12 +8,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// Simple wraps a simple handler function.
-// This is a utility function for creating Fiber handlers from simple functions.
-func Simple(handler func(*fiber.Ctx) error) fiber.Handler {
-	return handler
-}
-
 // AutoParseRequest returns middleware for automatic request parsing and validation.
 // The middleware parses request data from multiple sources (body, query, path, headers, cookies, form)
 // based on struct tags and validates the parsed data using the provided schema.
@@ -65,10 +59,13 @@ func ValidateAndJSON(c *fiber.Ctx, data interface{}) error {
 	if v, ok := validatorInstance.(*validator.Validate); ok {
 		// Validate response data
 		if err := validateResponseData(data, schema, v); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error":   "Response validation failed",
-				"details": err.Error(),
-			})
+			return &ValidationResponseError{
+				Message: "Response validation failed",
+				Details: []FieldErrorDetail{{
+					Field:   "response",
+					Message: err.Error(),
+				}},
+			}
 		}
 	}
 

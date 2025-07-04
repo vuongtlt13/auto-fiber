@@ -52,6 +52,23 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 		field := reqType.Field(i)
 		fieldValue := reqValue.Field(i)
 
+		// Handle embedded (anonymous) struct fields recursively
+		if field.Anonymous && (fieldValue.Kind() == reflect.Struct || (fieldValue.Kind() == reflect.Ptr && fieldValue.Type().Elem().Kind() == reflect.Struct)) {
+			if fieldValue.Kind() == reflect.Ptr {
+				if fieldValue.IsNil() {
+					fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
+				}
+				if err := parseFromMultipleSources(c, fieldValue.Interface()); err != nil {
+					return fmt.Errorf("embedded field %s: %w", field.Name, err)
+				}
+			} else if fieldValue.CanAddr() {
+				if err := parseFromMultipleSources(c, fieldValue.Addr().Interface()); err != nil {
+					return fmt.Errorf("embedded field %s: %w", field.Name, err)
+				}
+			}
+			continue
+		}
+
 		// Get parsing information from struct tags
 		fieldInfo := getFieldInfo(field, c.Method())
 		if fieldInfo == nil {

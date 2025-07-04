@@ -11,7 +11,22 @@ import (
 )
 
 func setupGroup() (*autofiber.AutoFiber, *autofiber.AutoFiberGroup) {
-	af := autofiber.New(fiber.Config{})
+	af := autofiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			switch e := err.(type) {
+			case *autofiber.ValidationRequestError:
+				code := 400
+				if e.Message == "Validation failed" {
+					code = 422
+				}
+				return c.Status(code).JSON(e)
+			case *autofiber.ValidationResponseError:
+				return c.Status(500).JSON(e)
+			default:
+				return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			}
+		},
+	})
 	group := af.Group("/api")
 	return af, group
 }
