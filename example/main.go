@@ -414,6 +414,66 @@ func (h *UserHandler) ExampleConvertFunctions(c *fiber.Ctx) (interface{}, error)
 	}, nil
 }
 
+// --- Embedded Struct Example ---
+type UserBase struct {
+	ID    int    `json:"id" validate:"required" description:"User ID"`
+	Name  string `json:"name" validate:"required" description:"User name"`
+	Email string `json:"email" validate:"required,email" description:"User email"`
+}
+
+type Address struct {
+	Street  string `json:"street" validate:"required" description:"Street address"`
+	City    string `json:"city" validate:"required" description:"City name"`
+	Country string `json:"country" validate:"required" description:"Country name"`
+}
+
+type CreateUserWithEmbeddedRequest struct {
+	UserBase           // Embedded user fields
+	Address            // Embedded address fields
+	PhoneNumber string `json:"phoneNumber" validate:"required" description:"Phone number"`
+	IsActive    bool   `json:"isActive" description:"User active status"`
+}
+
+type EmbeddedUserResponse struct {
+	UserBase              // Embedded user fields
+	Address               // Embedded address fields
+	CreatedAt   time.Time `json:"created_at" description:"Creation timestamp"`
+	PhoneNumber string    `json:"phoneNumber" description:"Phone number"`
+}
+
+func (h *UserHandler) CreateEmbeddedUser(c *fiber.Ctx, req *CreateUserWithEmbeddedRequest) (interface{}, error) {
+	return EmbeddedUserResponse{
+		UserBase:    req.UserBase,
+		Address:     req.Address,
+		CreatedAt:   time.Now(),
+		PhoneNumber: req.PhoneNumber,
+	}, nil
+}
+
+func (h *UserHandler) CreateEmbeddedUserGeneric(c *fiber.Ctx, req *CreateUserWithEmbeddedRequest) (*APIResponse[EmbeddedUserResponse], error) {
+	// Create response with embedded structs
+	response := &EmbeddedUserResponse{
+		UserBase: UserBase{
+			ID:    1,
+			Name:  req.Name,
+			Email: req.Email,
+		},
+		Address: Address{
+			Street:  req.Street,
+			City:    req.City,
+			Country: req.Country,
+		},
+		CreatedAt:   time.Now(),
+		PhoneNumber: req.PhoneNumber,
+	}
+
+	return &APIResponse[EmbeddedUserResponse]{
+		Code:    200,
+		Message: "User created successfully with embedded structs",
+		Data:    *response,
+	}, nil
+}
+
 func main() {
 	// Create AutoFiber app with docs configuration
 	app := autofiber.New(
@@ -530,6 +590,18 @@ func main() {
 		autofiber.WithTags("example", "convert"),
 	)
 
+	// Add new route for embedded struct example
+	app.Post("/embedded-users", userHandler.CreateEmbeddedUser,
+		autofiber.WithRequestSchema(CreateUserWithEmbeddedRequest{}),
+		autofiber.WithResponseSchema(EmbeddedUserResponse{}),
+	)
+
+	// Add new route for embedded struct + generic response example
+	app.Post("/embedded-users-generic", userHandler.CreateEmbeddedUserGeneric,
+		autofiber.WithRequestSchema(CreateUserWithEmbeddedRequest{}),
+		autofiber.WithResponseSchema(&APIResponse[EmbeddedUserResponse]{}),
+	)
+
 	// Serve API documentation
 	app.ServeDocs("/docs")
 	app.ServeSwaggerUI("/swagger", "/docs")
@@ -545,5 +617,5 @@ func main() {
 	log.Println("- GET /users/:user_id: Smart parsing with response validation")
 	log.Println("- POST /organizations/:org_id/users: Multi-source parsing with response validation")
 	log.Println("Generic response endpoints: /auth/user-generic, /auth/users-generic")
-	app.Listen(":3000")
+	log.Fatal(app.Listen(":3000"))
 }

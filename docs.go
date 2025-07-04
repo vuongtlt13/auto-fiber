@@ -333,9 +333,60 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 	// Track which fields are handled by parse tags
 	handledFields := make(map[string]bool)
 
-	// Process fields based on parse tags
+	// Process fields based on parse tags (including embedded structs)
+	dg.processFieldsForParameters(t, &parameters, &bodySchema, &bodyFields, &needsBearer, handledFields)
+
+	// Create request body if there are body fields or if it's a POST/PUT/PATCH with struct schema
+	var requestBody *OpenAPIRequestBody
+	method := strings.ToUpper(guessMethodFromPath(path))
+
+	if len(bodyFields) > 0 || ((method == "POST" || method == "PUT" || method == "PATCH") && t.Kind() == reflect.Struct) {
+		// Register the schema as a component and use $ref
+		tStruct := t
+		if tStruct.Kind() == reflect.Ptr {
+			tStruct = tStruct.Elem()
+		}
+		var structPtr interface{}
+		if tStruct.Kind() == reflect.Struct {
+			structPtr = reflect.New(tStruct).Interface()
+		} else {
+			structPtr = schema
+		}
+		dg.addSchema(structPtr)
+		schemaName := GetSchemaName(structPtr)
+		requestBody = &OpenAPIRequestBody{
+			Required: true,
+			Content: map[string]OpenAPIMediaType{
+				"application/json": {
+					Schema: &OpenAPISchema{
+						Ref: "#/components/schemas/" + schemaName,
+					},
+				},
+			},
+		}
+	}
+
+	return parameters, requestBody, needsBearer
+}
+
+// processFieldsForParameters processes struct fields (including embedded structs) to extract parameters and body fields
+func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *[]OpenAPIParameter, bodySchema *OpenAPISchema, bodyFields *[]string, needsBearer *bool, handledFields map[string]bool) {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+
+		// Handle embedded (anonymous) struct fields recursively
+		if field.Anonymous {
+			ft := field.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				// Recursively process embedded struct
+				dg.processFieldsForParameters(ft, parameters, bodySchema, bodyFields, needsBearer, handledFields)
+				continue
+			}
+		}
+
 		parseTag := field.Tag.Get("parse")
 
 		// Get field name for JSON
@@ -368,11 +419,11 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 
 		switch source {
 		case "path":
-			for j, param := range parameters {
+			for j, param := range *parameters {
 				if param.Name == key {
 					fieldSchema := dg.convertFieldTypeToSchema(field.Type)
-					parameters[j].Schema = &fieldSchema
-					parameters[j].Description = field.Tag.Get("description")
+					(*parameters)[j].Schema = &fieldSchema
+					(*parameters)[j].Description = field.Tag.Get("description")
 					break
 				}
 			}
@@ -385,22 +436,20 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 				Description: field.Tag.Get("description"),
 				Schema:      &fieldSchema,
 			}
-			parameters = append(parameters, param)
+			*parameters = append(*parameters, param)
 		case "header":
 			if strings.ToLower(key) == "authorization" {
-				needsBearer = true
-				continue
-			} else {
-				fieldSchema := dg.convertFieldTypeToSchema(field.Type)
-				param := OpenAPIParameter{
-					Name:        key,
-					In:          "header",
-					Required:    isRequired,
-					Description: field.Tag.Get("description"),
-					Schema:      &fieldSchema,
-				}
-				parameters = append(parameters, param)
+				*needsBearer = true
 			}
+			fieldSchema := dg.convertFieldTypeToSchema(field.Type)
+			param := OpenAPIParameter{
+				Name:        key,
+				In:          "header",
+				Required:    isRequired,
+				Description: field.Tag.Get("description"),
+				Schema:      &fieldSchema,
+			}
+			*parameters = append(*parameters, param)
 		case "cookie":
 			fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 			param := OpenAPIParameter{
@@ -410,10 +459,10 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 				Description: field.Tag.Get("description"),
 				Schema:      &fieldSchema,
 			}
-			parameters = append(parameters, param)
+			*parameters = append(*parameters, param)
 		case "body":
 			if bodySchema.Properties == nil {
-				bodySchema = OpenAPISchema{
+				*bodySchema = OpenAPISchema{
 					Type:       "object",
 					Properties: make(map[string]OpenAPISchema),
 					Required:   []string{},
@@ -423,10 +472,10 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 			if isRequired {
 				bodySchema.Required = append(bodySchema.Required, key)
 			}
-			bodyFields = append(bodyFields, key)
+			*bodyFields = append(*bodyFields, key)
 		case "auto":
 			if bodySchema.Properties == nil {
-				bodySchema = OpenAPISchema{
+				*bodySchema = OpenAPISchema{
 					Type:       "object",
 					Properties: make(map[string]OpenAPISchema),
 					Required:   []string{},
@@ -436,43 +485,9 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 			if isRequired {
 				bodySchema.Required = append(bodySchema.Required, key)
 			}
-			bodyFields = append(bodyFields, key)
+			*bodyFields = append(*bodyFields, key)
 		}
 	}
-
-	// Create request body if there are body fields
-	var requestBody *OpenAPIRequestBody
-	if len(bodyFields) > 0 {
-		// Register the schema as a component and use $ref
-		dg.addSchema(schema)
-		schemaName := GetSchemaName(schema)
-		requestBody = &OpenAPIRequestBody{
-			Required: true,
-			Content: map[string]OpenAPIMediaType{
-				"application/json": {
-					Schema: &OpenAPISchema{
-						Ref: "#/components/schemas/" + schemaName,
-					},
-				},
-			},
-		}
-	} else {
-		// Fallback: if POST/PUT/PATCH and has request schema, use ConvertRequestToOpenAPISchema
-		method := strings.ToUpper(guessMethodFromPath(path))
-		if (method == "POST" || method == "PUT" || method == "PATCH") && t.Kind() == reflect.Struct {
-			schemaObj := dg.ConvertRequestToOpenAPISchema(schema)
-			requestBody = &OpenAPIRequestBody{
-				Required: true,
-				Content: map[string]OpenAPIMediaType{
-					"application/json": {
-						Schema: &schemaObj,
-					},
-				},
-			}
-		}
-	}
-
-	return parameters, requestBody, needsBearer
 }
 
 // generatePathParameters generates parameters for path variables from the URL path.
@@ -566,7 +581,18 @@ func (dg *DocsGenerator) addSchema(schema interface{}) {
 	if _, exists := dg.schemas[schemaName]; exists {
 		return
 	}
-	openAPISchema := dg.ConvertRequestToOpenAPISchema(schema)
+	// Always pass pointer to struct type
+	t := reflect.TypeOf(schema)
+	var structPtr interface{}
+	if t.Kind() == reflect.Ptr {
+		structPtr = schema
+	} else if t.Kind() == reflect.Struct {
+		structPtr = reflect.New(t).Interface()
+	} else {
+		structPtr = schema
+	}
+	// Flatten and merge all embedded fields before adding
+	openAPISchema := dg.ConvertRequestToOpenAPISchema(structPtr)
 	dg.schemas[schemaName] = openAPISchema
 }
 
@@ -589,6 +615,8 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 		return OpenAPISchema{Type: "object"}
 	}
 
+	fmt.Printf("[DEBUG] Processing struct: %s\n", t.Name())
+
 	openAPISchema := OpenAPISchema{
 		Type:       "object",
 		Properties: make(map[string]OpenAPISchema),
@@ -597,6 +625,25 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+
+		// Handle embedded (anonymous) struct fields: flatten all fields except those with json:"-"
+		if field.Anonymous {
+			ft := field.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				fmt.Printf("[DEBUG]  Flatten embedded struct: %s\n", ft.Name())
+				// Recursively flatten the embedded struct
+				embeddedSchema := dg.ConvertRequestToOpenAPISchema(reflect.New(ft).Elem().Interface())
+				for k, v := range embeddedSchema.Properties {
+					openAPISchema.Properties[k] = v
+				}
+				openAPISchema.Required = append(openAPISchema.Required, embeddedSchema.Required...)
+				fmt.Printf("[DEBUG]  Properties after flatten: %+v\n", openAPISchema.Properties)
+				continue
+			}
+		}
 
 		parseTag := field.Tag.Get("parse")
 		jsonTag := field.Tag.Get("json")
@@ -657,7 +704,7 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 			openAPISchema.Required = append(openAPISchema.Required, fieldName)
 		}
 	}
-
+	fmt.Printf("[DEBUG] Final properties for %s: %+v\n", t.Name(), openAPISchema.Properties)
 	return openAPISchema
 }
 
@@ -681,6 +728,22 @@ func (dg *DocsGenerator) ConvertResponseToOpenAPISchema(schema interface{}) Open
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+
+		// Handle embedded (anonymous) struct fields: flatten their fields
+		if field.Anonymous {
+			ft := field.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				embeddedSchema := dg.ConvertResponseToOpenAPISchema(reflect.New(ft).Elem().Interface())
+				for k, v := range embeddedSchema.Properties {
+					openAPISchema.Properties[k] = v
+				}
+				openAPISchema.Required = append(openAPISchema.Required, embeddedSchema.Required...)
+				continue
+			}
+		}
 
 		// Get json tag
 		jsonTag := field.Tag.Get("json")
@@ -877,4 +940,20 @@ func guessMethodFromPath(path string) string {
 
 func (dg *DocsGenerator) Schemas() map[string]OpenAPISchema {
 	return dg.schemas
+}
+
+// GetSchemaNameFromRef extracts the schema name from an OpenAPI reference string.
+// It handles references in the format "#/components/schemas/SchemaName".
+func GetSchemaNameFromRef(ref string) string {
+	if ref == "" {
+		return ""
+	}
+
+	// Remove the "#/components/schemas/" prefix
+	prefix := "#/components/schemas/"
+	if strings.HasPrefix(ref, prefix) {
+		return ref[len(prefix):]
+	}
+
+	return ref
 }

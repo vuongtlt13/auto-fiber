@@ -40,7 +40,7 @@ build/
 
 # Temporary files
 tmp/
-temp/
+temp/ 
 
 # OpenAPI files
 openapi.json 

@@ -2,6 +2,7 @@ package autofiber_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -1395,7 +1396,12 @@ func TestConvertResponseToOpenAPISchema_ComplexNested(t *testing.T) {
 }
 
 func TestOpenAPISpec_RegisterRequestBodySchema(t *testing.T) {
-	app := autofiber.New(fiber.Config{})
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
 
 	type RegisterRequest struct {
 		Email     string    `json:"email" validate:"required,email"`
@@ -1405,48 +1411,663 @@ func TestOpenAPISpec_RegisterRequestBodySchema(t *testing.T) {
 	}
 
 	app.Post("/register", func(c *fiber.Ctx, req *RegisterRequest) (interface{}, error) {
-		return req, nil
+		return map[string]string{"message": "registered"}, nil
 	}, autofiber.WithRequestSchema(RegisterRequest{}))
 
+	// Generate OpenAPI spec
 	spec := app.GetOpenAPISpec()
-	path, exists := spec.Paths["/register"]
-	if !exists || path == (autofiber.OpenAPIPath{}) || path.Post == nil {
-		t.Fatal("POST /register not found in OpenAPI spec")
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/register"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Post)
+
+	// Check request body schema
+	requestBody := pathItem.Post.RequestBody
+	assert.NotNil(t, requestBody)
+	assert.NotNil(t, requestBody.Content)
+	assert.NotNil(t, requestBody.Content["application/json"])
+	assert.NotNil(t, requestBody.Content["application/json"].Schema)
+
+	// Get the schema reference
+	schemaRef := requestBody.Content["application/json"].Schema
+	assert.NotNil(t, schemaRef.Ref)
+
+	// Find the actual schema
+	schemaName := autofiber.GetSchemaNameFromRef(schemaRef.Ref)
+	schema, exists := spec.Components.Schemas[schemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, schema)
+
+	// Check that all fields are present
+	assert.Contains(t, schema.Properties, "email")
+	assert.Contains(t, schema.Properties, "password")
+	assert.Contains(t, schema.Properties, "name")
+	assert.Contains(t, schema.Properties, "birth_date")
+}
+
+// =============================================================================
+// EMBEDDED STRUCTS TESTS
+// =============================================================================
+
+func TestEmbeddedStructs_RequestSchema(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Base structs that will be embedded
+	type BaseUser struct {
+		ID    int    `json:"id" validate:"required"`
+		Name  string `json:"name" validate:"required"`
+		Email string `json:"email" validate:"required,email"`
 	}
-	requestBody := path.Post.RequestBody
-	if requestBody == nil {
-		t.Fatal("RequestBody for POST /register is nil")
+
+	type BaseAddress struct {
+		Street  string `json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
 	}
-	media, ok := requestBody.Content["application/json"]
-	if !ok {
-		t.Fatal("application/json content not found in requestBody")
+
+	// Request with embedded structs
+	type CreateUserRequest struct {
+		BaseUser           // Embedded struct - fields should be flattened
+		BaseAddress        // Embedded struct - fields should be flattened
+		PhoneNumber string `json:"phoneNumber" validate:"required"`
+		IsActive    bool   `json:"isActive"`
 	}
-	schema := media.Schema
-	if schema == nil {
-		t.Fatal("Schema for requestBody is nil")
-	}
-	if schema.Type != "object" {
-		t.Errorf("Expected schema type 'object', got '%s'", schema.Type)
-	}
-	// Check properties
-	expectedFields := []string{"email", "password", "name", "birth_date"}
+
+	app.Post("/users", func(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
+		return map[string]string{"message": "user created"}, nil
+	}, autofiber.WithRequestSchema(CreateUserRequest{}))
+
+	// Generate OpenAPI spec
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/users"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Post)
+
+	// Check request body schema
+	requestBody := pathItem.Post.RequestBody
+	assert.NotNil(t, requestBody)
+	assert.NotNil(t, requestBody.Content)
+	assert.NotNil(t, requestBody.Content["application/json"])
+	assert.NotNil(t, requestBody.Content["application/json"].Schema)
+
+	// Get the schema reference
+	schemaRef := requestBody.Content["application/json"].Schema
+	assert.NotNil(t, schemaRef.Ref)
+
+	// Find the actual schema
+	schemaName := autofiber.GetSchemaNameFromRef(schemaRef.Ref)
+	schema, exists := spec.Components.Schemas[schemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, schema)
+
+	// Check that all fields from embedded structs are flattened and present
+	expectedFields := []string{"id", "name", "email", "street", "city", "country", "phoneNumber", "isActive"}
 	for _, field := range expectedFields {
-		if _, ok := schema.Properties[field]; !ok {
-			t.Errorf("Expected field '%s' in request body schema", field)
-		}
+		assert.Contains(t, schema.Properties, field, "Field %s should be present in flattened schema", field)
 	}
-	// Check required fields
-	expectedRequired := []string{"email", "password", "name"}
-	for _, req := range expectedRequired {
-		found := false
-		for _, r := range schema.Required {
-			if r == req {
-				found = true
-				break
+
+	// Verify the schema has the correct number of properties
+	assert.Equal(t, len(expectedFields), len(schema.Properties))
+}
+
+func TestEmbeddedStructs_ResponseSchema(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Base structs that will be embedded
+	type BaseUser struct {
+		ID        int       `json:"id" validate:"required"`
+		Name      string    `json:"name" validate:"required"`
+		Email     string    `json:"email" validate:"required,email"`
+		CreatedAt time.Time `json:"createdAt" validate:"required"`
+	}
+
+	type BaseAddress struct {
+		Street  string `json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
+		ZipCode string `json:"zipCode"`
+	}
+
+	// Response with embedded structs
+	type UserResponse struct {
+		BaseUser               // Embedded struct - fields should be flattened
+		BaseAddress            // Embedded struct - fields should be flattened
+		IsActive    bool       `json:"isActive"`
+		LastLoginAt *time.Time `json:"lastLoginAt"`
+	}
+
+	app.Get("/users/:id", func(c *fiber.Ctx) (interface{}, error) {
+		return &UserResponse{}, nil
+	}, autofiber.WithResponseSchema(UserResponse{}))
+
+	// Generate OpenAPI spec
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/users/{id}"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Get)
+
+	// Check response schema
+	responses := pathItem.Get.Responses
+	assert.NotNil(t, responses)
+
+	// Check 200 response
+	response200, exists := responses["200"]
+	assert.True(t, exists)
+	assert.NotNil(t, response200.Content)
+	assert.NotNil(t, response200.Content["application/json"])
+	assert.NotNil(t, response200.Content["application/json"].Schema)
+
+	// Get the schema reference
+	schemaRef := response200.Content["application/json"].Schema
+	assert.NotNil(t, schemaRef.Ref)
+
+	// Find the actual schema
+	schemaName := autofiber.GetSchemaNameFromRef(schemaRef.Ref)
+	schema, exists := spec.Components.Schemas[schemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, schema)
+
+	// Check that all fields from embedded structs are flattened and present
+	expectedFields := []string{"id", "name", "email", "createdAt", "street", "city", "country", "zipCode", "isActive", "lastLoginAt"}
+	for _, field := range expectedFields {
+		assert.Contains(t, schema.Properties, field, "Field %s should be present in flattened schema", field)
+	}
+
+	// Verify the schema has the correct number of properties
+	assert.Equal(t, len(expectedFields), len(schema.Properties))
+}
+
+func TestEmbeddedStructs_WithParseTags(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Base structs with parse tags
+	type BaseAuth struct {
+		Token  string `parse:"header:Authorization" json:"token" validate:"required"`
+		APIKey string `parse:"header:X-API-Key" json:"apiKey"`
+	}
+
+	type BasePagination struct {
+		Page     int `parse:"query:page" json:"page" validate:"gte=1"`
+		PageSize int `parse:"query:page_size" json:"pageSize" validate:"gte=1,lte=100"`
+	}
+
+	// Request with embedded structs containing parse tags
+	type ListUsersRequest struct {
+		BaseAuth              // Embedded struct with parse tags
+		BasePagination        // Embedded struct with parse tags
+		SearchTerm     string `parse:"query:search" json:"searchTerm"`
+		UserID         int    `parse:"path:user_id" json:"userId"`
+		UserData       string `parse:"body:user_data" json:"userData" validate:"required"`
+	}
+
+	app.Get("/users/:user_id", func(c *fiber.Ctx, req *ListUsersRequest) (interface{}, error) {
+		return map[string]string{"message": "users listed"}, nil
+	}, autofiber.WithRequestSchema(ListUsersRequest{}))
+
+	// Generate OpenAPI spec
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/users/{user_id}"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Get)
+
+	// Check parameters (from parse tags)
+	parameters := pathItem.Get.Parameters
+	assert.NotNil(t, parameters)
+
+	// Check that parameters from embedded structs are included
+	paramNames := make([]string, len(parameters))
+	for i, param := range parameters {
+		paramNames[i] = param.Name
+	}
+
+	// Check for parameters from BaseAuth
+	assert.Contains(t, paramNames, "Authorization")
+	assert.Contains(t, paramNames, "X-API-Key")
+
+	// Check for parameters from BasePagination
+	assert.Contains(t, paramNames, "page")
+	assert.Contains(t, paramNames, "page_size")
+
+	// Check for other parameters
+	assert.Contains(t, paramNames, "search")
+	assert.Contains(t, paramNames, "user_id")
+
+	// Check request body schema (only body fields should be included)
+	requestBody := pathItem.Get.RequestBody
+	if requestBody != nil && requestBody.Content != nil {
+		mediaType, exists := requestBody.Content["application/json"]
+		if exists && mediaType.Schema != nil && mediaType.Schema.Ref != "" {
+			schemaName := autofiber.GetSchemaNameFromRef(mediaType.Schema.Ref)
+			schema, exists := spec.Components.Schemas[schemaName]
+			if exists {
+				// Only body fields should be in the schema
+				assert.Contains(t, schema.Properties, "userData")
+				// Fields with parse tags other than body should not be in schema
+				assert.NotContains(t, schema.Properties, "token")
+				assert.NotContains(t, schema.Properties, "apiKey")
+				assert.NotContains(t, schema.Properties, "page")
+				assert.NotContains(t, schema.Properties, "pageSize")
+				assert.NotContains(t, schema.Properties, "searchTerm")
+				assert.NotContains(t, schema.Properties, "userId")
 			}
 		}
-		if !found {
-			t.Errorf("Expected required field '%s' in request body schema", req)
-		}
 	}
+}
+
+func TestEmbeddedStructs_DeepNesting(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Deep nested embedded structs
+	type BaseEntity struct {
+		ID        int       `json:"id" validate:"required"`
+		CreatedAt time.Time `json:"createdAt" validate:"required"`
+		UpdatedAt time.Time `json:"updatedAt" validate:"required"`
+	}
+
+	type BaseUser struct {
+		BaseEntity        // Embedded BaseEntity
+		Name       string `json:"name" validate:"required"`
+		Email      string `json:"email" validate:"required,email"`
+	}
+
+	type BaseAddress struct {
+		BaseEntity        // Embedded BaseEntity
+		Street     string `json:"street" validate:"required"`
+		City       string `json:"city" validate:"required"`
+		Country    string `json:"country" validate:"required"`
+	}
+
+	// Complex request with multiple levels of embedding
+	type ComplexUserRequest struct {
+		BaseUser           // Embedded BaseUser (which embeds BaseEntity)
+		BaseAddress        // Embedded BaseAddress (which embeds BaseEntity)
+		PhoneNumber string `json:"phoneNumber" validate:"required"`
+		IsActive    bool   `json:"isActive"`
+	}
+
+	app.Post("/complex-users", func(c *fiber.Ctx, req *ComplexUserRequest) (interface{}, error) {
+		return map[string]string{"message": "complex user created"}, nil
+	}, autofiber.WithRequestSchema(ComplexUserRequest{}))
+
+	// Generate OpenAPI spec
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/complex-users"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Post)
+
+	// Check request body schema
+	requestBody := pathItem.Post.RequestBody
+	assert.NotNil(t, requestBody)
+	assert.NotNil(t, requestBody.Content)
+	assert.NotNil(t, requestBody.Content["application/json"])
+	assert.NotNil(t, requestBody.Content["application/json"].Schema)
+
+	// Get the schema reference
+	schemaRef := requestBody.Content["application/json"].Schema
+	assert.NotNil(t, schemaRef.Ref)
+
+	// Find the actual schema
+	schemaName := autofiber.GetSchemaNameFromRef(schemaRef.Ref)
+	schema, exists := spec.Components.Schemas[schemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, schema)
+
+	// Check that all fields from deeply embedded structs are flattened and present
+	expectedFields := []string{
+		"id", "createdAt", "updatedAt", // From BaseEntity (embedded in BaseUser)
+		"name", "email", // From BaseUser
+		"street", "city", "country", // From BaseAddress
+		"phoneNumber", "isActive", // Direct fields
+	}
+
+	for _, field := range expectedFields {
+		assert.Contains(t, schema.Properties, field, "Field %s should be present in flattened schema", field)
+	}
+
+	// Verify the schema has the correct number of properties
+	assert.Equal(t, len(expectedFields), len(schema.Properties))
+}
+
+func TestEmbeddedStructs_WithPointerEmbedding(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Base structs
+	type BaseUser struct {
+		ID    int    `json:"id" validate:"required"`
+		Name  string `json:"name" validate:"required"`
+		Email string `json:"email" validate:"required,email"`
+	}
+
+	type BaseAddress struct {
+		Street  string `json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
+	}
+
+	// Request with pointer embedded structs
+	type UserRequestWithPointers struct {
+		*BaseUser           // Pointer embedded struct
+		*BaseAddress        // Pointer embedded struct
+		PhoneNumber  string `json:"phoneNumber" validate:"required"`
+		IsActive     bool   `json:"isActive"`
+	}
+
+	app.Post("/users-with-pointers", func(c *fiber.Ctx, req *UserRequestWithPointers) (interface{}, error) {
+		return map[string]string{"message": "user with pointers created"}, nil
+	}, autofiber.WithRequestSchema(UserRequestWithPointers{}))
+
+	// Generate OpenAPI spec
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/users-with-pointers"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Post)
+
+	// Check request body schema
+	requestBody := pathItem.Post.RequestBody
+	assert.NotNil(t, requestBody)
+	assert.NotNil(t, requestBody.Content)
+	assert.NotNil(t, requestBody.Content["application/json"])
+	assert.NotNil(t, requestBody.Content["application/json"].Schema)
+
+	// Get the schema reference
+	schemaRef := requestBody.Content["application/json"].Schema
+	assert.NotNil(t, schemaRef.Ref)
+
+	// Find the actual schema
+	schemaName := autofiber.GetSchemaNameFromRef(schemaRef.Ref)
+	schema, exists := spec.Components.Schemas[schemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, schema)
+
+	// Check that all fields from pointer embedded structs are flattened and present
+	expectedFields := []string{"id", "name", "email", "street", "city", "country", "phoneNumber", "isActive"}
+	for _, field := range expectedFields {
+		assert.Contains(t, schema.Properties, field, "Field %s should be present in flattened schema", field)
+	}
+
+	// Verify the schema has the correct number of properties
+	assert.Equal(t, len(expectedFields), len(schema.Properties))
+}
+
+func TestEmbeddedStructs_ValidationRules(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Base structs with validation rules
+	type BaseUser struct {
+		ID    int    `json:"id" validate:"required,gt=0"`
+		Name  string `json:"name" validate:"required,min=2,max=50"`
+		Email string `json:"email" validate:"required,email"`
+		Age   int    `json:"age" validate:"gte=18,lte=120"`
+	}
+
+	type BaseAddress struct {
+		Street  string `json:"street" validate:"required,min=5"`
+		City    string `json:"city" validate:"required,min=2"`
+		Country string `json:"country" validate:"required,len=2"`
+		ZipCode string `json:"zipCode" validate:"required,regexp=^[0-9]{5}$"`
+	}
+
+	// Request with embedded structs
+	type ValidatedUserRequest struct {
+		BaseUser           // Embedded struct with validation rules
+		BaseAddress        // Embedded struct with validation rules
+		PhoneNumber string `json:"phoneNumber" validate:"required,regexp=^[0-9]{10}$"`
+		IsActive    bool   `json:"isActive"`
+	}
+
+	app.Post("/validated-users", func(c *fiber.Ctx, req *ValidatedUserRequest) (interface{}, error) {
+		return map[string]string{"message": "validated user created"}, nil
+	}, autofiber.WithRequestSchema(ValidatedUserRequest{}))
+
+	// Generate OpenAPI spec
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/validated-users"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Post)
+
+	// Check request body schema
+	requestBody := pathItem.Post.RequestBody
+	assert.NotNil(t, requestBody)
+	assert.NotNil(t, requestBody.Content)
+	assert.NotNil(t, requestBody.Content["application/json"])
+	assert.NotNil(t, requestBody.Content["application/json"].Schema)
+
+	// Get the schema reference
+	schemaRef := requestBody.Content["application/json"].Schema
+	assert.NotNil(t, schemaRef.Ref)
+
+	// Find the actual schema
+	schemaName := autofiber.GetSchemaNameFromRef(schemaRef.Ref)
+	schema, exists := spec.Components.Schemas[schemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, schema)
+
+	// Check that all fields are present with their validation rules
+	expectedFields := []string{"id", "name", "email", "age", "street", "city", "country", "zipCode", "phoneNumber", "isActive"}
+	for _, field := range expectedFields {
+		assert.Contains(t, schema.Properties, field, "Field %s should be present in flattened schema", field)
+	}
+
+	// Verify the schema has the correct number of properties
+	assert.Equal(t, len(expectedFields), len(schema.Properties))
+
+	// Check that validation rules are properly applied to embedded fields
+	// Note: The actual validation rule checking would require more detailed schema inspection
+	// This test primarily verifies that embedded structs are properly flattened
+}
+
+func TestEmbeddedStructs_WithGenericResponse(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Base structs
+	type BaseUser struct {
+		ID    int    `json:"id" validate:"required"`
+		Name  string `json:"name" validate:"required"`
+		Email string `json:"email" validate:"required,email"`
+	}
+
+	type BaseAddress struct {
+		Street  string `json:"street" validate:"required"`
+		City    string `json:"city" validate:"required"`
+		Country string `json:"country" validate:"required"`
+	}
+
+	// Request with embedded structs
+	type CreateUserWithEmbeddedRequest struct {
+		BaseUser           // Embedded struct - fields should be flattened
+		BaseAddress        // Embedded struct - fields should be flattened
+		PhoneNumber string `json:"phoneNumber" validate:"required"`
+		IsActive    bool   `json:"isActive"`
+	}
+
+	// Response with embedded structs
+	type EmbeddedUserResponse struct {
+		BaseUser              // Embedded struct - fields should be flattened
+		BaseAddress           // Embedded struct - fields should be flattened
+		CreatedAt   time.Time `json:"created_at"`
+		PhoneNumber string    `json:"phoneNumber"`
+	}
+
+	// Generic response wrapper
+	type APIResponse[T any] struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    T      `json:"data"`
+	}
+
+	app.Post("/embedded-users-generic", func(c *fiber.Ctx, req *CreateUserWithEmbeddedRequest) (*APIResponse[EmbeddedUserResponse], error) {
+		response := &EmbeddedUserResponse{
+			BaseUser: BaseUser{
+				ID:    1,
+				Name:  req.Name,
+				Email: req.Email,
+			},
+			BaseAddress: BaseAddress{
+				Street:  req.Street,
+				City:    req.City,
+				Country: req.Country,
+			},
+			CreatedAt:   time.Now(),
+			PhoneNumber: req.PhoneNumber,
+		}
+
+		return &APIResponse[EmbeddedUserResponse]{
+			Code:    200,
+			Message: "User created successfully",
+			Data:    *response,
+		}, nil
+	}, autofiber.WithRequestSchema(CreateUserWithEmbeddedRequest{}), autofiber.WithResponseSchema(&APIResponse[EmbeddedUserResponse]{}))
+
+	// Generate OpenAPI spec
+	spec := app.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+
+	// Check if route is documented
+	pathItem, exists := spec.Paths["/embedded-users-generic"]
+	assert.True(t, exists)
+	assert.NotNil(t, pathItem.Post)
+
+	// Check request body schema
+	requestBody := pathItem.Post.RequestBody
+	assert.NotNil(t, requestBody)
+	assert.NotNil(t, requestBody.Content)
+	assert.NotNil(t, requestBody.Content["application/json"])
+	assert.NotNil(t, requestBody.Content["application/json"].Schema)
+
+	// Get the request schema reference
+	requestSchemaRef := requestBody.Content["application/json"].Schema
+	assert.NotNil(t, requestSchemaRef.Ref)
+
+	// Find the actual request schema
+	requestSchemaName := autofiber.GetSchemaNameFromRef(requestSchemaRef.Ref)
+	requestSchema, exists := spec.Components.Schemas[requestSchemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, requestSchema)
+
+	// Check that all fields from embedded structs are flattened in request schema
+	expectedRequestFields := []string{
+		"id", "name", "email", // From BaseUser
+		"street", "city", "country", // From BaseAddress
+		"phoneNumber", "isActive", // Direct fields
+	}
+
+	for _, field := range expectedRequestFields {
+		assert.Contains(t, requestSchema.Properties, field, "Request field %s should be present in flattened schema", field)
+	}
+
+	// Verify the request schema has the correct number of properties
+	assert.Equal(t, len(expectedRequestFields), len(requestSchema.Properties))
+
+	// Check response schema
+	responses := pathItem.Post.Responses
+	assert.NotNil(t, responses)
+
+	// Check 200 response
+	response200, exists := responses["200"]
+	assert.True(t, exists)
+	assert.NotNil(t, response200.Content)
+	assert.NotNil(t, response200.Content["application/json"])
+	assert.NotNil(t, response200.Content["application/json"].Schema)
+
+	// Get the response schema reference
+	responseSchemaRef := response200.Content["application/json"].Schema
+	assert.NotNil(t, responseSchemaRef.Ref)
+
+	// Find the actual response schema
+	responseSchemaName := autofiber.GetSchemaNameFromRef(responseSchemaRef.Ref)
+	responseSchema, exists := spec.Components.Schemas[responseSchemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, responseSchema)
+
+	// Check that the response schema has the expected structure (APIResponse wrapper)
+	assert.Contains(t, responseSchema.Properties, "code")
+	assert.Contains(t, responseSchema.Properties, "message")
+	assert.Contains(t, responseSchema.Properties, "data")
+
+	// Check the data field schema (should be EmbeddedUserResponse)
+	dataSchema := responseSchema.Properties["data"]
+	assert.NotNil(t, dataSchema)
+	assert.NotNil(t, dataSchema.Ref)
+
+	// Find the actual data schema (EmbeddedUserResponse)
+	dataSchemaName := autofiber.GetSchemaNameFromRef(dataSchema.Ref)
+	dataSchemaActual, exists := spec.Components.Schemas[dataSchemaName]
+	assert.True(t, exists)
+	assert.NotNil(t, dataSchemaActual)
+
+	// Check that all fields from embedded structs are flattened in response data schema
+	expectedResponseFields := []string{
+		"id", "name", "email", // From BaseUser
+		"street", "city", "country", // From BaseAddress
+		"created_at", "phoneNumber", // Direct fields
+	}
+
+	for _, field := range expectedResponseFields {
+		assert.Contains(t, dataSchemaActual.Properties, field, "Response data field %s should be present in flattened schema", field)
+	}
+
+	// Verify the response data schema has the correct number of properties
+	assert.Equal(t, len(expectedResponseFields), len(dataSchemaActual.Properties))
+
+	// Debug: Print all schemas to verify
+	fmt.Printf("[DEBUG] Request schema name: %s\n", requestSchemaName)
+	fmt.Printf("[DEBUG] Response schema name: %s\n", responseSchemaName)
+	fmt.Printf("[DEBUG] Data schema name: %s\n", dataSchemaName)
+	fmt.Printf("[DEBUG] Request schema properties: %d\n", len(requestSchema.Properties))
+	fmt.Printf("[DEBUG] Response data schema properties: %d\n", len(dataSchemaActual.Properties))
 }

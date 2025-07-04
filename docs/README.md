@@ -6,21 +6,21 @@ Welcome to the AutoFiber documentation! This directory contains comprehensive gu
 
 ### Core Guides
 
-- **[Structs and Tags Guide](structs-and-tags.md)** - Complete guide to creating request/response structs with parsing tags, validation tags, and best practices
+- **[Structs and Tags Guide](structs-and-tags.md)** - Complete guide to creating request/response structs with parsing tags, validation tags, embedded structs, and best practices
 - **[Complete Request/Response Flow](complete-flow.md)** - Detailed explanation of the complete flow: Parse Request → Validate Request → Execute Handler → Validate Response → Return JSON
 - **[Validation Rules and Best Practices](validation-rules.md)** - Comprehensive guide to validation rules, custom validators, and validation patterns
 - **[Migration Guide](migration-guide.md)** - Guide to migrate from old handler signatures to new required signatures
 
 ### Quick Navigation
 
-| Topic               | Description                                   | File                                       |
-| ------------------- | --------------------------------------------- | ------------------------------------------ |
-| **Getting Started** | Basic setup and first API                     | [Main README](../README.md)                |
-| **Structs & Tags**  | How to create request/response structs        | [structs-and-tags.md](structs-and-tags.md) |
-| **Complete Flow**   | Understanding the full request/response cycle | [complete-flow.md](complete-flow.md)       |
-| **Validation**      | Validation rules and custom validators        | [validation-rules.md](validation-rules.md) |
-| **Migration**       | Migrate from old handler signatures           | [migration-guide.md](migration-guide.md)   |
-| **Examples**        | Working examples and patterns                 | [../example/](../example/)                 |
+| Topic               | Description                                                         | File                                       |
+| ------------------- | ------------------------------------------------------------------- | ------------------------------------------ |
+| **Getting Started** | Basic setup and first API                                           | [Main README](../README.md)                |
+| **Structs & Tags**  | How to create request/response structs (including embedded structs) | [structs-and-tags.md](structs-and-tags.md) |
+| **Complete Flow**   | Understanding the full request/response cycle                       | [complete-flow.md](complete-flow.md)       |
+| **Validation**      | Validation rules and custom validators                              | [validation-rules.md](validation-rules.md) |
+| **Migration**       | Migrate from old handler signatures                                 | [migration-guide.md](migration-guide.md)   |
+| **Examples**        | Working examples and patterns                                       | [../example/](../example/)                 |
 
 ## 🚀 Quick Start
 

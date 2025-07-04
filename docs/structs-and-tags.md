@@ -101,6 +101,70 @@ type Post struct {
 }
 ```
 
+### Embedded Structs
+
+You can use embedded (anonymous) structs to compose request and response schemas. All fields from embedded structs will be flattened into the parent schema for parsing, validation, and OpenAPI documentation.
+
+**Example:**
+
+```go
+// Base structs
+ type UserBase struct {
+     ID    int    `json:"id" validate:"required"`
+     Name  string `json:"name" validate:"required"`
+     Email string `json:"email" validate:"required,email"`
+ }
+
+ type Address struct {
+     Street  string `json:"street" validate:"required"`
+     City    string `json:"city" validate:"required"`
+     Country string `json:"country" validate:"required"`
+ }
+
+// Request with embedded structs
+ type CreateUserWithEmbeddedRequest struct {
+     UserBase // Embedded user fields
+     Address  // Embedded address fields
+     Phone    string `json:"phone" validate:"required"`
+ }
+
+// Response with embedded structs
+ type EmbeddedUserResponse struct {
+     UserBase
+     Address
+     Phone    string    `json:"phone"`
+     Created  time.Time `json:"created_at"`
+ }
+```
+
+**How it works:**
+
+- All fields from `UserBase` and `Address` are treated as if they are direct fields of `CreateUserWithEmbeddedRequest` and `EmbeddedUserResponse`.
+- Validation, parsing, and OpenAPI schema generation will include all embedded fields at the top level.
+- This makes it easy to reuse and compose schemas for large APIs.
+
+**Handler example:**
+
+```go
+func (h *UserHandler) CreateEmbeddedUser(c *fiber.Ctx, req *CreateUserWithEmbeddedRequest) (interface{}, error) {
+    return EmbeddedUserResponse{
+        UserBase: req.UserBase,
+        Address:  req.Address,
+        Phone:    req.Phone,
+        Created:  time.Now(),
+    }, nil
+}
+```
+
+**Route registration:**
+
+```go
+app.Post("/embedded-users", userHandler.CreateEmbeddedUser,
+    autofiber.WithRequestSchema(CreateUserWithEmbeddedRequest{}),
+    autofiber.WithResponseSchema(EmbeddedUserResponse{}),
+)
+```
+
 ## OpenAPI Schema Naming
 
 - For non-generic structs, the schema name is the type name (e.g., `LoginResponse`).
