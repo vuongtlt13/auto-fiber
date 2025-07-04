@@ -384,3 +384,51 @@ func TestParseEmbeddedPointerStructs_WithValidation(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+func TestResponseValidation_NoRequestSchema(t *testing.T) {
+	app := newTestApp()
+
+	type SimpleResponse struct {
+		ID    int    `json:"id" validate:"required"`
+		Name  string `json:"name" validate:"required"`
+		Email string `json:"email" validate:"required,email"`
+	}
+
+	// Handler returns invalid response (missing required fields)
+	app.Get("/no-req-schema-invalid", func(c *fiber.Ctx) (interface{}, error) {
+		return SimpleResponse{ID: 0, Name: "", Email: "not-an-email"}, nil
+	}, autofiber.WithResponseSchema(SimpleResponse{}))
+
+	req := httptest.NewRequest(http.MethodGet, "/no-req-schema-invalid", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	var respBody map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&respBody)
+	assert.Equal(t, "Response validation failed", respBody["error"])
+	// Should mention 'response' in details
+	details, ok := respBody["details"].([]interface{})
+	assert.True(t, ok, "details should be an array")
+	foundResponse := false
+	for _, d := range details {
+		if m, ok := d.(map[string]interface{}); ok {
+			if f, ok := m["field"].(string); ok {
+				if strings.Contains(f, "response") {
+					foundResponse = true
+				}
+			}
+		}
+	}
+	assert.True(t, foundResponse, "details should mention response")
+
+	// Handler returns valid response
+	app.Get("/no-req-schema-valid", func(c *fiber.Ctx) (interface{}, error) {
+		return SimpleResponse{ID: 1, Name: "Test", Email: "test@example.com"}, nil
+	}, autofiber.WithResponseSchema(SimpleResponse{}))
+
+	req = httptest.NewRequest(http.MethodGet, "/no-req-schema-valid", nil)
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}

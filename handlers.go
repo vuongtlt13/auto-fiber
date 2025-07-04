@@ -30,6 +30,12 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 				if err != nil {
 					return err
 				}
+				// Validate response if schema is set
+				if opts.ResponseSchema != nil {
+					c.Locals("response_schema", opts.ResponseSchema)
+					c.Locals("response_validator", af.validator)
+					return ValidateAndJSON(c, data)
+				}
 				return c.JSON(data)
 			}
 		}
