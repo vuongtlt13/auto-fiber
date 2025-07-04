@@ -684,6 +684,14 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 		if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct && field.Type.Elem() != reflect.TypeOf(time.Time{}) {
 			dg.addSchema(reflect.New(field.Type.Elem()).Interface())
 		}
+		// Register slice/array element types if they are structs
+		if (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) && field.Type.Elem().Kind() == reflect.Struct && field.Type.Elem() != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type.Elem()).Interface())
+		}
+		// Also register pointer to slice/array element types if they are structs
+		if (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) && field.Type.Elem().Kind() == reflect.Ptr && field.Type.Elem().Elem().Kind() == reflect.Struct && field.Type.Elem().Elem() != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type.Elem().Elem()).Interface())
+		}
 
 		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 
@@ -771,6 +779,14 @@ func (dg *DocsGenerator) ConvertResponseToOpenAPISchema(schema interface{}) Open
 		// Also register pointer to struct types
 		if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct && field.Type.Elem() != reflect.TypeOf(time.Time{}) {
 			dg.addSchema(reflect.New(field.Type.Elem()).Interface())
+		}
+		// Register slice/array element types if they are structs
+		if (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) && field.Type.Elem().Kind() == reflect.Struct && field.Type.Elem() != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type.Elem()).Interface())
+		}
+		// Also register pointer to slice/array element types if they are structs
+		if (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) && field.Type.Elem().Kind() == reflect.Ptr && field.Type.Elem().Elem().Kind() == reflect.Struct && field.Type.Elem().Elem() != reflect.TypeOf(time.Time{}) {
+			dg.addSchema(reflect.New(field.Type.Elem().Elem()).Interface())
 		}
 
 		// Convert field type to OpenAPI schema

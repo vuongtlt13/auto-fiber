@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	autofiber "github.com/vuongtlt13/auto-fiber"
 )
 
@@ -2057,4 +2058,86 @@ func TestEmbeddedStructs_WithGenericResponse(t *testing.T) {
 	// Verify the response data schema has the correct number of properties
 	assert.Equal(t, len(expectedResponseFields), len(dataSchemaActual.Properties))
 
+}
+
+func TestUserDataTableResult_GenericResponse_SchemaRegistration(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	type UserBase struct {
+		Email    string `json:"email" validate:"required,email"`
+		FullName string `json:"fullName" validate:"required,min=1,max=255"`
+		IsActive bool   `json:"isActive" default:"true"`
+		IsAdmin  bool   `json:"isAdmin" default:"false"`
+	}
+	type UserInDBBase struct {
+		UserBase
+		ID        int64     `json:"id"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+	type UserInfo struct {
+		UserInDBBase
+		UserRoles []string `json:"userRoles,omitempty"`
+	}
+	type UserRecord struct {
+		UserInfo
+	}
+	type UserDataTableResult struct {
+		Items []UserRecord `json:"items"`
+		Total int64        `json:"total"`
+	}
+	type APIResponse[T any] struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    T      `json:"data"`
+	}
+
+	app.Get("/users/datatable", func(c *fiber.Ctx) (*APIResponse[UserDataTableResult], error) {
+		return &APIResponse[UserDataTableResult]{
+			Code:    200,
+			Message: "OK",
+			Data: UserDataTableResult{
+				Items: []UserRecord{},
+				Total: 0,
+			},
+		}, nil
+	}, autofiber.WithResponseSchema(&APIResponse[UserDataTableResult]{}))
+
+	spec := app.GetOpenAPISpec()
+	require.NotNil(t, spec)
+
+	// Kiểm tra schema UserRecord tồn tại
+	_, exists := spec.Components.Schemas["UserRecord"]
+	assert.True(t, exists, "UserRecord schema should be registered in OpenAPI components")
+
+	// Kiểm tra UserDataTableResult.items là array of UserRecord
+	dataTableSchema, ok := spec.Components.Schemas["UserDataTableResult"]
+	require.True(t, ok)
+	itemsSchema := dataTableSchema.Properties["items"]
+	require.NotNil(t, itemsSchema)
+	require.NotNil(t, itemsSchema.Items)
+	assert.Equal(t, "#/components/schemas/UserRecord", itemsSchema.Items.Ref)
+
+	// Kiểm tra response schema đúng structure
+	pathItem, ok := spec.Paths["/users/datatable"]
+	require.True(t, ok)
+	response := pathItem.Get.Responses["200"]
+	require.NotNil(t, response)
+	respSchema := response.Content["application/json"].Schema
+	require.NotNil(t, respSchema.Ref)
+	respSchemaName := autofiber.GetSchemaNameFromRef(respSchema.Ref)
+	assert.Equal(t, "APIResponse_UserDataTableResult", respSchemaName)
+
+	// Kiểm tra các trường của UserRecord được flatten đúng
+	recordSchema, ok := spec.Components.Schemas["UserRecord"]
+	require.True(t, ok)
+	expectedFields := []string{"email", "fullName", "isActive", "isAdmin", "id", "createdAt", "updatedAt", "userRoles"}
+	for _, field := range expectedFields {
+		assert.Contains(t, recordSchema.Properties, field, "UserRecord schema should contain field %s", field)
+	}
 }
