@@ -2,7 +2,6 @@ package autofiber_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -1070,9 +1069,6 @@ func TestConvertRequestToOpenAPISchema(t *testing.T) {
 
 	schema := dg.ConvertRequestToOpenAPISchema(UserRequest{})
 
-	// Debug: print actual schema properties
-	t.Logf("Actual schema properties: %v", schema.Properties)
-
 	// Only expect fields with parse tag (body) or valid json tag
 	expectedFields := []string{"data", "email"}
 	for _, field := range expectedFields {
@@ -1122,9 +1118,6 @@ func TestConvertResponseToOpenAPISchema(t *testing.T) {
 	}
 
 	schema := dg.ConvertResponseToOpenAPISchema(UserResponse{})
-
-	// Debug: print actual schema properties
-	t.Logf("Actual schema properties: %v", schema.Properties)
 
 	// Check fields with json tags
 	jsonTagFields := map[string]string{
@@ -2064,10 +2057,4 @@ func TestEmbeddedStructs_WithGenericResponse(t *testing.T) {
 	// Verify the response data schema has the correct number of properties
 	assert.Equal(t, len(expectedResponseFields), len(dataSchemaActual.Properties))
 
-	// Debug: Print all schemas to verify
-	fmt.Printf("[DEBUG] Request schema name: %s\n", requestSchemaName)
-	fmt.Printf("[DEBUG] Response schema name: %s\n", responseSchemaName)
-	fmt.Printf("[DEBUG] Data schema name: %s\n", dataSchemaName)
-	fmt.Printf("[DEBUG] Request schema properties: %d\n", len(requestSchema.Properties))
-	fmt.Printf("[DEBUG] Response data schema properties: %d\n", len(dataSchemaActual.Properties))
 }

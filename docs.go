@@ -615,8 +615,6 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 		return OpenAPISchema{Type: "object"}
 	}
 
-	fmt.Printf("[DEBUG] Processing struct: %s\n", t.Name())
-
 	openAPISchema := OpenAPISchema{
 		Type:       "object",
 		Properties: make(map[string]OpenAPISchema),
@@ -633,14 +631,12 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
-				fmt.Printf("[DEBUG]  Flatten embedded struct: %s\n", ft.Name())
 				// Recursively flatten the embedded struct
 				embeddedSchema := dg.ConvertRequestToOpenAPISchema(reflect.New(ft).Elem().Interface())
 				for k, v := range embeddedSchema.Properties {
 					openAPISchema.Properties[k] = v
 				}
 				openAPISchema.Required = append(openAPISchema.Required, embeddedSchema.Required...)
-				fmt.Printf("[DEBUG]  Properties after flatten: %+v\n", openAPISchema.Properties)
 				continue
 			}
 		}
@@ -704,7 +700,6 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 			openAPISchema.Required = append(openAPISchema.Required, fieldName)
 		}
 	}
-	fmt.Printf("[DEBUG] Final properties for %s: %+v\n", t.Name(), openAPISchema.Properties)
 	return openAPISchema
 }
 
