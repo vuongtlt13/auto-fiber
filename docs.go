@@ -231,12 +231,42 @@ func (dg *DocsGenerator) GenerateOpenAPISpec() *OpenAPISpec {
 
 	// Generate paths from routes
 	for _, route := range dg.routes {
-		path, hasBearer := dg.generatePathWithSecurity(route)
+		newPath, hasBearer := dg.generatePathWithSecurity(route)
 		if hasBearer {
 			needsBearerAuth = true
 		}
+
 		openAPIPath := convertPathToOpenAPIFormat(route.Path)
-		spec.Paths[openAPIPath] = path
+
+		// Merge operations for the same path but different HTTP methods
+		existingPath, ok := spec.Paths[openAPIPath]
+		if !ok {
+			existingPath = OpenAPIPath{}
+		}
+
+		if newPath.Get != nil {
+			existingPath.Get = newPath.Get
+		}
+		if newPath.Post != nil {
+			existingPath.Post = newPath.Post
+		}
+		if newPath.Put != nil {
+			existingPath.Put = newPath.Put
+		}
+		if newPath.Delete != nil {
+			existingPath.Delete = newPath.Delete
+		}
+		if newPath.Patch != nil {
+			existingPath.Patch = newPath.Patch
+		}
+		if newPath.Head != nil {
+			existingPath.Head = newPath.Head
+		}
+		if newPath.Options != nil {
+			existingPath.Options = newPath.Options
+		}
+
+		spec.Paths[openAPIPath] = existingPath
 	}
 
 	// Add bearerAuth security scheme if needed

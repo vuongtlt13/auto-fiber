@@ -594,6 +594,30 @@ func TestOpenAPISpec_NoRequestBody_ForGET_DELETE_HEAD_OPTIONS(t *testing.T) {
 	assert.Nil(t, path.Options.RequestBody, "OPTIONS operation must not have requestBody in OpenAPI spec")
 }
 
+func TestOpenAPISpec_MultipleMethodsSamePath(t *testing.T) {
+	app := autofiber.New(fiber.Config{},
+		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{
+			Title:   "Test API",
+			Version: "1.0.0",
+		}),
+	)
+
+	// Register multiple methods on the same path
+	app.Get("/multi/:id", func(c *fiber.Ctx) (interface{}, error) {
+		return "get", nil
+	})
+	app.Post("/multi/:id", func(c *fiber.Ctx) (interface{}, error) {
+		return "post", nil
+	})
+
+	spec := app.GetOpenAPISpec()
+
+	pathItem, exists := spec.Paths["/multi/{id}"]
+	assert.True(t, exists, "path should exist in OpenAPI spec")
+	assert.NotNil(t, pathItem.Get, "GET operation should be documented for the path")
+	assert.NotNil(t, pathItem.Post, "POST operation should be documented for the path")
+}
+
 // TestConvertToOpenAPISchema_SimpleStruct tests conversion of simple structs
 func TestConvertToOpenAPISchema_SimpleStruct(t *testing.T) {
 	dg := autofiber.NewDocsGenerator()

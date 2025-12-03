@@ -555,7 +555,7 @@ func main() {
 		autofiber.WithDescription("Get user by ID with smart parsing and response validation"),
 		autofiber.WithTags("user", "admin"),
 	)
-	userGroup.Post("/simple", userHandler.CreateSimpleUser,
+	userGroup.Post("/", userHandler.CreateSimpleUser,
 		autofiber.WithRequestSchema(SimpleUserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
 		autofiber.WithDescription("Create simple user (body only, json tag)"),
