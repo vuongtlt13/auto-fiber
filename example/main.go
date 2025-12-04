@@ -79,6 +79,26 @@ type SimpleUserRequest struct {
 	IsActive bool   `json:"isActive" description:"User active status"`
 }
 
+// GetUserFilterRequest demonstrates a GET endpoint where the request schema
+// does NOT use parse tags. For GET methods, fields without a parse tag will be
+// interpreted as query parameters using their json tag (or field name) when
+// generating the OpenAPI spec.
+//
+// Example request:
+//   GET /users/filters?name=John&email=john@example.com&page=1&perPage=20
+//
+// In the generated OpenAPI specification, these fields will appear as:
+// - name (query, required)
+// - email (query, optional)
+// - page (query, optional, >= 1)
+// - perPage (query, optional, between 1 and 100)
+type GetUserFilterRequest struct {
+	Name    string `json:"name" validate:"required" description:"Filter by user name"`
+	Email   string `json:"email" description:"Filter by user email"`
+	Page    int    `json:"page" validate:"gte=1" description:"Page number (>= 1)"`
+	PerPage int    `json:"perPage" validate:"gte=1,lte=100" description:"Items per page (1-100)"`
+}
+
 // UserResponse represents user data with validation
 type UserResponse struct {
 	ID        int       `json:"id" validate:"required" description:"User ID"`
@@ -560,6 +580,28 @@ func main() {
 		autofiber.WithResponseSchema(UserResponse{}),
 		autofiber.WithDescription("Create simple user (body only, json tag)"),
 		autofiber.WithTags("user"),
+	)
+
+	// Demonstrate GET with RequestSchema that has ONLY json tags (no parse tags).
+	// For this endpoint, when generating the OpenAPI spec:
+	//   - All fields in GetUserFilterRequest will be treated as query parameters.
+	//   - The parameter names are taken from the json tags (name, email, page, perPage).
+	//   - Required/optional is derived from the validate tag (e.g., `validate:"required"`).
+	//
+	// Example:
+	//   GET /users/filters?name=John&email=john@example.com&page=1&perPage=20
+	//
+	// This shows the "fallback" behavior for GET when you only define json/validate/description tags.
+	userGroup.Get("/filters", func(c *fiber.Ctx, req *GetUserFilterRequest) (interface{}, error) {
+		// In a real handler you would use the parsed filters (req.Name, req.Email, req.Page, req.PerPage)
+		// to query your data source. Here we just return them back as an example response.
+		return fiber.Map{
+			"filters": req,
+		}, nil
+	},
+		autofiber.WithRequestSchema(GetUserFilterRequest{}),
+		autofiber.WithDescription("List users using GET with filters inferred from JSON tags (no parse tags)"),
+		autofiber.WithTags("user", "filters", "example"),
 	)
 	userGroup.Post("/from-map", userHandler.CreateUserFromMap,
 		autofiber.WithResponseSchema(UserResponse{}),

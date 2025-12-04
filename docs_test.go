@@ -594,6 +594,62 @@ func TestOpenAPISpec_NoRequestBody_ForGET_DELETE_HEAD_OPTIONS(t *testing.T) {
 	assert.Nil(t, path.Options.RequestBody, "OPTIONS operation must not have requestBody in OpenAPI spec")
 }
 
+// Test that for GET routes, fields without parse tags default to query parameters using json tags.
+func TestOpenAPISpec_GET_DefaultQueryParamsFromJSONTags(t *testing.T) {
+	type GetFilterRequest struct {
+		Name    string `json:"name" validate:"required"`
+		Email   string `json:"email"`
+		Page    int    `json:"page" validate:"gte=1"`
+		PerPage int    `json:"perPage" validate:"gte=1,lte=100"`
+		Hidden  string `json:"-"` // should be ignored
+	}
+
+	app := autofiber.New(fiber.Config{})
+	app.Get("/filters", func(c *fiber.Ctx, req *GetFilterRequest) (interface{}, error) {
+		return req, nil
+	}, autofiber.WithRequestSchema(GetFilterRequest{}))
+
+	spec := app.GetOpenAPISpec()
+
+	path, exists := spec.Paths["/filters"]
+	assert.True(t, exists)
+	require.NotNil(t, path.Get)
+
+	params := path.Get.Parameters
+	require.NotNil(t, params)
+
+	// Helper to find a parameter by name
+	findParam := func(name string) *autofiber.OpenAPIParameter {
+		for i := range params {
+			if params[i].Name == name && params[i].In == "query" {
+				return &params[i]
+			}
+		}
+		return nil
+	}
+
+	nameParam := findParam("name")
+	require.NotNil(t, nameParam)
+	assert.True(t, nameParam.Required)
+
+	emailParam := findParam("email")
+	require.NotNil(t, emailParam)
+	assert.False(t, emailParam.Required)
+
+	pageParam := findParam("page")
+	require.NotNil(t, pageParam)
+
+	perPageParam := findParam("perPage")
+	require.NotNil(t, perPageParam)
+
+	// Hidden field should not appear
+	hiddenParam := findParam("hidden")
+	assert.Nil(t, hiddenParam)
+
+	// GET must not have requestBody
+	assert.Nil(t, path.Get.RequestBody, "GET operation must not have requestBody in OpenAPI spec")
+}
+
 func TestOpenAPISpec_MultipleMethodsSamePath(t *testing.T) {
 	app := autofiber.New(fiber.Config{},
 		autofiber.WithOpenAPI(autofiber.OpenAPIInfo{

@@ -302,7 +302,7 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 	hasBearer := false
 	// Add parameters and request body based on parse tags
 	if route.Options != nil && route.Options.RequestSchema != nil {
-		parameters, requestBody, needsBearer := dg.generateParametersAndBodyWithSecurity(route.Options.RequestSchema, route.Path)
+		parameters, requestBody, needsBearer := dg.generateParametersAndBodyWithSecurity(route.Options.RequestSchema, route.Path, route.Method)
 		operation.Parameters = parameters
 		// Only allow requestBody for POST, PUT, PATCH
 		methodUpper := strings.ToUpper(route.Method)
@@ -341,8 +341,9 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 
 // generateParametersAndBodyWithSecurity generates parameters and request body from parse tags with security handling.
 // It analyzes struct fields and their parse tags to determine parameter sources (query, path, header, cookie, body).
+// For GET methods, fields without a parse tag default to query parameters based on their json tag.
 // Returns parameters, request body, and a boolean indicating if bearer authentication is required.
-func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{}, path string) ([]OpenAPIParameter, *OpenAPIRequestBody, bool) {
+func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{}, path, method string) ([]OpenAPIParameter, *OpenAPIRequestBody, bool) {
 	var parameters []OpenAPIParameter
 	var bodyFields []string
 	var bodySchema OpenAPISchema
@@ -366,11 +367,16 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 	// Process fields based on parse tags (including embedded structs)
 	dg.processFieldsForParameters(t, &parameters, &bodySchema, &bodyFields, &needsBearer, handledFields)
 
+	methodUpper := strings.ToUpper(method)
+
+	// For GET requests: fields without parse tags default to query parameters (using json tag or field name)
+	if methodUpper == "GET" {
+		dg.addDefaultQueryParametersForGET(t, &parameters, handledFields)
+	}
+
 	// Create request body if there are body fields or if it's a POST/PUT/PATCH with struct schema
 	var requestBody *OpenAPIRequestBody
-	method := strings.ToUpper(guessMethodFromPath(path))
-
-	if len(bodyFields) > 0 || ((method == "POST" || method == "PUT" || method == "PATCH") && t.Kind() == reflect.Struct) {
+	if len(bodyFields) > 0 || ((methodUpper == "POST" || methodUpper == "PUT" || methodUpper == "PATCH") && t.Kind() == reflect.Struct) {
 		// Register the schema as a component and use $ref
 		tStruct := t
 		if tStruct.Kind() == reflect.Ptr {
@@ -430,11 +436,10 @@ func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *
 		validateTag := field.Tag.Get("validate")
 		isRequired := strings.Contains(validateTag, "required")
 
-		handledFields[jsonName] = true
-
 		// Parse the parseTag for source and key
 		var source, key string
 		if parseTag != "" {
+			handledFields[jsonName] = true
 			parts := strings.Split(parseTag, ",")
 			sourcePart := parts[0]
 			sourceKey := strings.SplitN(sourcePart, ":", 2)
@@ -517,6 +522,73 @@ func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *
 			}
 			*bodyFields = append(*bodyFields, key)
 		}
+	}
+}
+
+// addDefaultQueryParametersForGET adds query parameters for struct fields that don't have parse tags.
+// It uses the json tag (or field name if json tag is empty) as the query parameter name.
+func (dg *DocsGenerator) addDefaultQueryParametersForGET(t reflect.Type, parameters *[]OpenAPIParameter, handledFields map[string]bool) {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// Handle embedded (anonymous) struct fields recursively
+		if field.Anonymous {
+			ft := field.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				dg.addDefaultQueryParametersForGET(ft, parameters, handledFields)
+				continue
+			}
+		}
+
+		parseTag := field.Tag.Get("parse")
+		if parseTag != "" {
+			// Already handled by explicit parse tag
+			continue
+		}
+
+		// Get JSON field name
+		jsonTag := field.Tag.Get("json")
+		jsonName := strings.Split(jsonTag, ",")[0]
+		if jsonName == "" {
+			jsonName = field.Name
+		}
+		if jsonName == "-" {
+			continue
+		}
+
+		// Skip if this field was handled by parse tag logic
+		if handledFields[jsonName] {
+			continue
+		}
+
+		// Avoid adding duplicate parameters with the same name in "query"
+		duplicate := false
+		for _, param := range *parameters {
+			if param.In == "query" && param.Name == jsonName {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+
+		// Determine if the field is required
+		validateTag := field.Tag.Get("validate")
+		isRequired := strings.Contains(validateTag, "required")
+
+		fieldSchema := dg.convertFieldTypeToSchema(field.Type)
+		param := OpenAPIParameter{
+			Name:        jsonName,
+			In:          "query",
+			Required:    isRequired,
+			Description: field.Tag.Get("description"),
+			Schema:      &fieldSchema,
+		}
+		*parameters = append(*parameters, param)
 	}
 }
 
