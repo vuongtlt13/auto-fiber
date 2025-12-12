@@ -44,3 +44,10 @@ func WithTags(tags ...string) RouteOption {
 		opts.Tags = tags
 	}
 }
+
+// WithJwtAuth requires HTTP Bearer (JWT) authentication for this route (OpenAPI security).
+func WithJwtAuth() RouteOption {
+	return func(opts *RouteOptions) {
+		opts.RequireJWTAuth = true
+	}
+}

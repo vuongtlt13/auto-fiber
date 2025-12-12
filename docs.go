@@ -318,6 +318,15 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 		operation.Parameters = dg.generatePathParameters(route.Path)
 	}
 
+	// Apply JWT auth security if requested for this route
+	if route.Options != nil && route.Options.RequireJWTAuth {
+		if operation.Security == nil {
+			operation.Security = []map[string][]string{}
+		}
+		operation.Security = append(operation.Security, map[string][]string{"bearerAuth": {}})
+		hasBearer = true
+	}
+
 	path := OpenAPIPath{}
 	switch strings.ToUpper(route.Method) {
 	case "GET":
@@ -484,7 +493,9 @@ func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *
 				Description: field.Tag.Get("description"),
 				Schema:      &fieldSchema,
 			}
-			*parameters = append(*parameters, param)
+			if strings.ToLower(key) != "authorization" {
+				*parameters = append(*parameters, param)
+			}
 		case "cookie":
 			fieldSchema := dg.convertFieldTypeToSchema(field.Type)
 			param := OpenAPIParameter{

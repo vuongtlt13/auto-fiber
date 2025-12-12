@@ -1720,8 +1720,16 @@ func TestEmbeddedStructs_WithParseTags(t *testing.T) {
 		paramNames[i] = param.Name
 	}
 
-	// Check for parameters from BaseAuth
-	assert.Contains(t, paramNames, "Authorization")
+	// Check auth: Authorization should be enforced via security scheme (bearerAuth), while X-API-Key remains as header param
+	assert.NotNil(t, pathItem.Get.Security)
+	foundBearer := false
+	for _, sec := range pathItem.Get.Security {
+		if _, ok := sec["bearerAuth"]; ok {
+			foundBearer = true
+			break
+		}
+	}
+	assert.True(t, foundBearer, "bearerAuth security should be present")
 	assert.Contains(t, paramNames, "X-API-Key")
 
 	// Check for parameters from BasePagination

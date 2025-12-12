@@ -10,6 +10,9 @@ func newTestApp() *autofiber.AutoFiber {
 	return autofiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			switch e := err.(type) {
+			case *fiber.Error:
+				// Preserve status code for fiber errors (e.g., Missing Authorization -> 401)
+				return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
 			case *autofiber.ValidationRequestError:
 				code := 400
 				if e.Message == "Validation failed" {

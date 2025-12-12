@@ -19,6 +19,7 @@ func WithOpenAPI(info OpenAPIInfo) AutoFiberOption {
 	}
 }
 
+
 // AutoFiber is the main application struct for building APIs with automatic parsing, validation, and documentation.
 type AutoFiber struct {
 	App           *fiber.App

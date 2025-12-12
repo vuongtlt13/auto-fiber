@@ -2,6 +2,10 @@
 package autofiber
 
 import (
+	"reflect"
+	"strings"
+	"time"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )
@@ -16,6 +20,7 @@ type RouteOptions struct {
 	Middleware     []fiber.Handler // Middleware handlers for the route
 	Description    string          // Description for API documentation
 	Tags           []string        // Tags for API documentation
+	RequireJWTAuth bool            // Require HTTP Bearer (JWT) auth for this route (OpenAPI security)
 }
 
 // ParseSource defines where a field should be parsed from (e.g., body, query, path, header, etc.).
@@ -74,11 +79,95 @@ func GetValidator() *validator.Validate {
 	return validate
 }
 
+// ValidateStruct is a helper that validates any struct using the global validator.
+// It is especially convenient to use from your domain models or services:
+//
+//   type User struct {
+//       Email string `json:"email" validate:"required,email"`
+//       Age   int    `json:"age" validate:"gte=18"`
+//   }
+//
+//   u := &User{Email: "test@example.com", Age: 20}
+//   if err := autofiber.ValidateStruct(u); err != nil {
+//       // handle validation error
+//   }
+//
+func ValidateStruct[T any](m *T) error {
+	return GetValidator().Struct(m)
+}
+
 // applyOptions applies a list of RouteOption to RouteOptions and returns the configured RouteOptions.
 func applyOptions(options []RouteOption) *RouteOptions {
 	opts := &RouteOptions{}
 	for _, opt := range options {
 		opt(opts)
 	}
+
+	// Infer JWT auth requirement from request schema if not explicitly set.
+	// If a schema has a required Authorization header (parse:"header:Authorization" with required),
+	// mark the route as requiring JWT auth for consistent behavior/docs.
+	if !opts.RequireJWTAuth && opts.RequestSchema != nil {
+		if schemaRequiresAuthHeader(opts.RequestSchema) {
+			opts.RequireJWTAuth = true
+		}
+	}
+
 	return opts
+}
+
+// schemaRequiresAuthHeader returns true if the schema declares a required Authorization header.
+func schemaRequiresAuthHeader(schema interface{}) bool {
+	t := reflect.TypeOf(schema)
+	if t == nil {
+		return false
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	return structHasAuthHeader(t)
+}
+
+func structHasAuthHeader(t reflect.Type) bool {
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+
+		// Recurse into embedded structs (excluding time.Time)
+		if f.Anonymous {
+			ft := f.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				if structHasAuthHeader(ft) {
+					return true
+				}
+			}
+		}
+
+		parseTag := f.Tag.Get("parse")
+		validateTag := f.Tag.Get("validate")
+
+		var source, key string
+		if parseTag != "" {
+			parts := strings.Split(parseTag, ",")
+			sourcePart := parts[0]
+			sourceKey := strings.SplitN(sourcePart, ":", 2)
+			source = sourceKey[0]
+			if len(sourceKey) == 2 {
+				key = sourceKey[1]
+			} else {
+				key = f.Name
+			}
+		}
+
+		required := strings.Contains(parseTag, "required") || strings.Contains(validateTag, "required")
+
+		if strings.EqualFold(source, "header") && strings.EqualFold(key, "authorization") && required {
+			return true
+		}
+	}
+	return false
 }

@@ -85,7 +85,8 @@ type SimpleUserRequest struct {
 // generating the OpenAPI spec.
 //
 // Example request:
-//   GET /users/filters?name=John&email=john@example.com&page=1&perPage=20
+//
+//	GET /users/filters?name=John&email=john@example.com&page=1&perPage=20
 //
 // In the generated OpenAPI specification, these fields will appear as:
 // - name (query, required)
@@ -185,6 +186,26 @@ func (h *AuthHandler) LoginWithValidation(c *fiber.Ctx, req *LoginRequest) (inte
 			CreatedAt: time.Now(),
 		},
 		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}, nil
+}
+
+// AuthHeaderRequest demonstrates explicit Authorization header parsing
+type AuthHeaderRequest struct {
+	Authorization string `parse:"header:Authorization" validate:"required" description:"Bearer <token>"`
+}
+
+// ProfileWithJwtOption demonstrates using WithJwtAuth (route-level security) to declare Bearer auth
+func (h *AuthHandler) ProfileWithJwtOption(c *fiber.Ctx) (interface{}, error) {
+	return fiber.Map{
+		"message": "Profile (secured via WithJwtAuth)",
+	}, nil
+}
+
+// ProfileWithHeaderParse demonstrates using a request schema to parse Authorization header explicitly
+func (h *AuthHandler) ProfileWithHeaderParse(c *fiber.Ctx, req *AuthHeaderRequest) (interface{}, error) {
+	return fiber.Map{
+		"message":       "Profile (Authorization parsed via RequestSchema)",
+		"authorization": req.Authorization,
 	}, nil
 }
 
@@ -535,6 +556,16 @@ func main() {
 		autofiber.WithDescription("Authenticate user with response validation (complete flow demonstration)"),
 		autofiber.WithTags("auth", "authentication"),
 	)
+	authGroup.Get("/profile-with-jwt-option", handler.ProfileWithJwtOption,
+		autofiber.WithJwtAuth(), // Route-level JWT requirement in OpenAPI (no header parse in schema)
+		autofiber.WithDescription("Profile using WithJwtAuth (Bearer required via security scheme)"),
+		autofiber.WithTags("auth", "jwt", "example"),
+	)
+	authGroup.Get("/profile-with-header-parse", handler.ProfileWithHeaderParse,
+		autofiber.WithRequestSchema(AuthHeaderRequest{}), // Explicit Authorization header parsing
+		autofiber.WithDescription("Profile parsing Authorization header via RequestSchema"),
+		autofiber.WithTags("auth", "jwt", "example"),
+	)
 	authGroup.Post("/register", handler.Register,
 		autofiber.WithRequestSchema(RegisterRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
@@ -659,5 +690,5 @@ func main() {
 	log.Println("- GET /users/:user_id: Smart parsing with response validation")
 	log.Println("- POST /organizations/:org_id/users: Multi-source parsing with response validation")
 	log.Println("Generic response endpoints: /auth/user-generic, /auth/users-generic")
-	log.Fatal(app.Listen(":3000"))
+	log.Fatal(app.Listen(":3123"))
 }

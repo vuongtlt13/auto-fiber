@@ -41,20 +41,20 @@ go get github.com/vuongtlt13/auto-fiber
 auto-fiber/
   app.go            // App core: AutoFiber struct, route registration, group, listen, etc.
   group.go          // Route grouping logic
-  handlers.go       // Handler creation, signature validation, error handling
+  handlers.go       // Handler creation, signature validation, Authorization checks, response validation
   parser.go         // Request parsing from multiple sources (body, query, path, ...)
   validator.go      // Response validation logic
   map_parser.go     // Parse struct from map/interface
-  docs.go           // OpenAPI/Swagger documentation generation
-  options.go        // Route option functions (WithRequestSchema, WithResponseSchema, ...)
-  types.go          // Core types, RouteOptions, ParseSource, etc.
+  docs.go           // OpenAPI/Swagger documentation generation (bearerAuth, security)
+  options.go        // Route option functions (WithRequestSchema, WithResponseSchema, WithJwtAuth, ...)
+  types.go          // Core types, RouteOptions, ParseSource, RequireJWTAuth inference
   example/          // Example usage and demo app
   docs/             // Documentation and guides
 ```
 
 - **app.go**: Initialize app, register routes, groups, listen.
 - **group.go**: Support for route groups, group middleware.
-- **handlers.go**: Create handlers with correct signature, signature validation.
+- **handlers.go**: Create handlers with correct signature, signature validation, Authorization enforcement (401 on missing header when JWT is required), response validation.
 - **parser.go**: Automatically parse requests from multiple sources (body, query, path, header, cookie).
 - **validator.go**: Validate response before returning to client.
 - **map_parser.go**: Support parsing struct from map/interface (for test, mock, ...).
@@ -170,6 +170,88 @@ Parse Request → Validate Request → Execute Handler → Validate Response →
 4. **Validate Response**: Validate response data before sending
 5. **Return JSON**: Send validated response to client
 
+## Using Struct Validation Like Pydantic
+
+AutoFiber uses [`go-playground/validator`](https://pkg.go.dev/github.com/go-playground/validator/v10) under the hood.  
+You can declare structs with `validate:"..."` tags and manually trigger validation, similar to Pydantic,
+either via the `ValidateStruct` helper or directly from `GetValidator()`:
+
+```go
+type UserInput struct {
+    Email string `json:"email" validate:"required,email"`
+    Age   int    `json:"age" validate:"gte=18"`
+}
+
+func main() {
+    input := &UserInput{
+        Email: "invalid-email",
+        Age:   16,
+    }
+
+    // Option 1: use AutoFiber's generic helper
+    if err := autofiber.ValidateStruct(input); err != nil {
+        fmt.Printf("validation error (ValidateStruct): %+v\n", err)
+    }
+
+    // Option 2: use the global validator directly (if you need more control)
+    v := autofiber.GetValidator()
+    if err := v.Struct(input); err != nil {
+        fmt.Printf("validation error (GetValidator): %+v\n", err)
+    }
+}
+```
+
+In a request handler, if you use:
+
+```go
+autofiber.WithRequestSchema(MyRequest{})
+```
+
+AutoFiber will:
+
+1. Parse data into `*MyRequest` (body, query, path, header, cookie, form) based on tags.
+2. Call `ValidateStruct(req)` (or `GetValidator().Struct(req)`) to validate.
+3. Only execute your handler when the data is valid.
+
+### Notes about `required`, zero values, and nullable fields
+
+AutoFiber follows `go-playground/validator`'s semantics for `required`:
+
+- For **value types** (`int`, `float`, `string`, `bool`, structs):
+  - `required` means the field must be **non-zero** for its Go type:
+    - `0` for integers is considered **invalid** for `required`
+    - `0.0` for floats is invalid
+    - `""` (empty string) is invalid
+    - `false` for bool is invalid
+- For **pointer and reference types** (`*T`, `[]T`, `map[...]T`, etc.):
+  - `required` means the value must be **non-nil**.
+
+Common patterns:
+
+```go
+type User struct {
+    // Must be present and non-empty
+    Name string `json:"name" validate:"required"`
+
+    // 0 is allowed, but you still want a lower bound
+    Age int `json:"age" validate:"gte=0"`
+
+    // "Required but nullable" for JSON:
+    // - JSON must contain "nickname"
+    // - value can be null or a string
+    Nickname *string `json:"nickname" validate:"required"`
+}
+```
+
+With the above:
+
+- `{"name": "A", "age": 0, "nickname": "B"}` → valid
+- `{"name": "A", "age": 0, "nickname": null}` → valid (field present but null)
+- `{"name": "A", "age": 0}` → invalid (missing required `nickname`)
+- `{"age": 0, "nickname": "B"}` → invalid (missing required `name`)
+
+If you want `0` to be a valid value **and** enforce presence, prefer pointer types plus `required` or value types with range checks (e.g. `gte=0`) instead of `required` alone.
+
 ## Handler Signatures
 
 **Required Signatures for AutoFiber:**
@@ -204,6 +286,45 @@ func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
 ```
 
 > **Note:** AutoFiber requires handlers to return `(interface{}, error)` for automatic JSON marshaling and response validation. The old signature `func(c *fiber.Ctx, req *T) error` is no longer supported.
+
+## JWT Auth: Two Ways to Declare and Enforce Authorization
+
+AutoFiber supports Bearer (JWT) in OpenAPI/Swagger and runtime enforcement. You can declare JWT in two ways:
+
+1) **Route option:** `WithJwtAuth()`
+   - Adds `bearerAuth` security to the operation (OpenAPI) and ensures runtime checks for `Authorization`.
+
+2) **Request schema:** required `Authorization` header
+   - Example field: ``Authorization string `parse:"header:Authorization" validate:"required"``  
+   - `applyOptions` will auto-set `RequireJWTAuth` when it detects a required Authorization header in your schema (including embedded structs).
+
+### Runtime behavior
+- If `RequireJWTAuth` is true (either via `WithJwtAuth` or auto-inferred from schema), and the `Authorization` header is missing, the request returns **401 Missing Authorization header**.
+- This check happens for both handlers with and without a request schema.
+
+### Example: route option (no header parsing in schema)
+```go
+app.Get("/profile",
+    handler.Profile,
+    autofiber.WithJwtAuth(), // declares Bearer auth in docs + runtime 401 on missing Authorization
+)
+```
+
+### Example: request schema (explicit header parsing)
+```go
+type ProfileRequest struct {
+    Authorization string `parse:"header:Authorization" validate:"required" description:"Bearer <token>"`
+}
+
+app.Get("/profile",
+    handler.ProfileWithHeaderParse,
+    autofiber.WithRequestSchema(ProfileRequest{}), // auto-infers RequireJWTAuth from schema
+)
+```
+
+### What Swagger UI shows
+- Any route with JWT (either method) gets `security: [{"bearerAuth": []}]` and the `bearerAuth` scheme is added to `components.securitySchemes`.
+- Users can click **Authorize** and enter a Bearer token once; it applies to all secured routes.
 
 ## Documentation
 

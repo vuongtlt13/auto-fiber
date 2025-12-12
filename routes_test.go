@@ -269,6 +269,52 @@ func TestAutoFiber_Delete_WithMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+func TestAutoFiber_JWTAuth_NoSchema(t *testing.T) {
+	app := newTestApp()
+
+	app.Get("/secure-no-schema", func(c *fiber.Ctx) (interface{}, error) {
+		return fiber.Map{"ok": true}, nil
+	}, autofiber.WithJwtAuth())
+
+	// Missing Authorization -> 401
+	req := httptest.NewRequest(http.MethodGet, "/secure-no-schema", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	// With Authorization -> 200
+	req = httptest.NewRequest(http.MethodGet, "/secure-no-schema", nil)
+	req.Header.Set("Authorization", "Bearer token123")
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAutoFiber_JWTAuth_RequestSchema_Inferred(t *testing.T) {
+	app := newTestApp()
+
+	type JwtHeaderRequest struct {
+		Authorization string `parse:"header:Authorization" validate:"required"`
+	}
+
+	app.Get("/secure-schema", func(c *fiber.Ctx, req *JwtHeaderRequest) (interface{}, error) {
+		return fiber.Map{"auth": req.Authorization}, nil
+	}, autofiber.WithRequestSchema(JwtHeaderRequest{}))
+
+	// Missing Authorization -> 401 (inferred RequireJWTAuth)
+	req := httptest.NewRequest(http.MethodGet, "/secure-schema", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	// With Authorization -> 200
+	req = httptest.NewRequest(http.MethodGet, "/secure-schema", nil)
+	req.Header.Set("Authorization", "Bearer token123")
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 // =============================================================================
 // ROUTES WITH RESPONSE SCHEMA TESTS
 // =============================================================================

@@ -24,6 +24,11 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 		// Only allow func(*fiber.Ctx) (interface{}, error)
 		if handlerType.NumIn() == 1 && handlerType.NumOut() == 2 {
 			return func(c *fiber.Ctx) error {
+				// Enforce Authorization header when JWT auth is required (no request schema to validate it)
+				if opts.RequireJWTAuth && c.Get("Authorization") == "" {
+					return fiber.NewError(fiber.StatusUnauthorized, "Missing Authorization header")
+				}
+
 				results := reflect.ValueOf(handler).Call([]reflect.Value{reflect.ValueOf(c)})
 				data := results[0].Interface()
 				err, _ := results[1].Interface().(error)
@@ -60,6 +65,11 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 					}
 				}
 
+				// If JWT auth is required and Authorization header is missing -> 401
+				if opts.RequireJWTAuth && c.Get("Authorization") == "" {
+					return fiber.NewError(fiber.StatusUnauthorized, "Missing Authorization header")
+				}
+
 				// Handle validation errors (from validator)
 				if validationErrs, ok := err.(validator.ValidationErrors); ok {
 					var details []FieldErrorDetail
@@ -85,6 +95,13 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 			if req == nil {
 				return &ValidationRequestError{Message: "Invalid request"}
 			}
+
+			// Enforce Authorization header when JWT auth is required.
+			// Even though RequestSchema could already require it, this guarantees presence.
+			if opts.RequireJWTAuth && c.Get("Authorization") == "" {
+				return fiber.NewError(fiber.StatusUnauthorized, "Missing Authorization header")
+			}
+
 			results := reflect.ValueOf(handler).Call([]reflect.Value{reflect.ValueOf(c), reflect.ValueOf(req)})
 			data := results[0].Interface()
 			err, _ := results[1].Interface().(error)
