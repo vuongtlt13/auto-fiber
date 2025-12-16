@@ -1,8 +1,10 @@
 package autofiber_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -313,6 +315,30 @@ func TestAutoFiber_JWTAuth_RequestSchema_Inferred(t *testing.T) {
 	resp, err = app.Test(req)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAutoFiber_Delete_WithBodyParsing(t *testing.T) {
+	app := newTestApp()
+
+	type BulkDeleteRequest struct {
+		IDs []int `parse:"body:ids" json:"ids" validate:"required,len=2"`
+	}
+
+	app.Delete("/bulk-delete", func(c *fiber.Ctx, req *BulkDeleteRequest) (interface{}, error) {
+		return fiber.Map{"deleted": req.IDs}, nil
+	}, autofiber.WithRequestSchema(BulkDeleteRequest{}))
+
+	// With JSON body (should parse)
+	body := `{"ids":[1,2]}`
+	req := httptest.NewRequest(http.MethodDelete, "/bulk-delete", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	var result map[string][]int
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	assert.NoError(t, err)
+	assert.Equal(t, []int{1, 2}, result["deleted"])
 }
 
 // =============================================================================

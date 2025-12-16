@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -16,9 +17,12 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 	reqValue := reflect.ValueOf(req).Elem()
 	reqType := reqValue.Type()
 
+	// Detect if schema explicitly asks for body fields (parse:"body:...").
+	hasBodyFields := schemaHasBodyFields(reqType)
+
 	// Parse body for POST/PUT/PATCH methods
 	method := strings.ToUpper(c.Method())
-	if method == "POST" || method == "PUT" || method == "PATCH" {
+	if method == "POST" || method == "PUT" || method == "PATCH" || (hasBodyFields && len(c.Body()) > 0) {
 		contentType := c.Get("Content-Type")
 		if strings.Contains(contentType, "application/json") {
 			// For JSON requests, body is expected
@@ -82,6 +86,41 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 	}
 
 	return nil
+}
+
+// schemaHasBodyFields returns true if the schema has any field with parse:"body:...".
+func schemaHasBodyFields(t reflect.Type) bool {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous {
+			ft := f.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				if schemaHasBodyFields(ft) {
+					return true
+				}
+			}
+		}
+		parseTag := f.Tag.Get("parse")
+		if parseTag != "" {
+			parts := strings.Split(parseTag, ",")
+			sourcePart := parts[0]
+			sourceKey := strings.SplitN(sourcePart, ":", 2)
+			source := sourceKey[0]
+			if source == "body" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // getFieldInfo extracts parsing information from struct tags with smart defaults.
