@@ -1263,7 +1263,7 @@ func TestConvertResponseToOpenAPISchema(t *testing.T) {
 	}
 }
 
-// TestConvertRequestToOpenAPISchema_ParseTagPriority tests that parse tags take priority over json tags, but only for body source
+// TestConvertRequestToOpenAPISchema_ParseTagPriority tests that for body source, json tag overrides parse key when present
 func TestConvertRequestToOpenAPISchema_ParseTagPriority(t *testing.T) {
 	dg := autofiber.NewDocsGenerator()
 
@@ -1275,8 +1275,8 @@ func TestConvertRequestToOpenAPISchema_ParseTagPriority(t *testing.T) {
 
 	schema := dg.ConvertRequestToOpenAPISchema(TestRequest{})
 
-	// Only expect fields with parse tag (body) or valid json tag
-	expectedFields := []string{"user_id", "email"}
+	// For body, json tag should override parse key; include valid json-only fields
+	expectedFields := []string{"id", "email"}
 	for _, field := range expectedFields {
 		if _, exists := schema.Properties[field]; !exists {
 			t.Errorf("Expected field %s not found in schema", field)
@@ -1284,7 +1284,7 @@ func TestConvertRequestToOpenAPISchema_ParseTagPriority(t *testing.T) {
 	}
 
 	// Fields with parse tag (not body) or no valid tag should be skipped
-	skippedFields := []string{"search", "id", "name"}
+	skippedFields := []string{"search", "user_id", "name"}
 	for _, field := range skippedFields {
 		if _, exists := schema.Properties[field]; exists {
 			t.Errorf("Unexpected field %s found in schema", field)

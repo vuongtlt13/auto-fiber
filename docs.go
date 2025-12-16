@@ -304,9 +304,10 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 	if route.Options != nil && route.Options.RequestSchema != nil {
 		parameters, requestBody, needsBearer := dg.generateParametersAndBodyWithSecurity(route.Options.RequestSchema, route.Path, route.Method)
 		operation.Parameters = parameters
-		// Only allow requestBody for POST, PUT, PATCH
-		methodUpper := strings.ToUpper(route.Method)
-		if requestBody != nil && (methodUpper == "POST" || methodUpper == "PUT" || methodUpper == "PATCH") {
+		// Allow requestBody when present:
+		// - For POST/PUT/PATCH when schema is struct (existing behavior)
+		// - For other methods (e.g., DELETE) only when requestBody was explicitly built from body fields
+		if requestBody != nil {
 			operation.RequestBody = requestBody
 		}
 		if needsBearer {
@@ -355,6 +356,7 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{}, path, method string) ([]OpenAPIParameter, *OpenAPIRequestBody, bool) {
 	var parameters []OpenAPIParameter
 	var bodyFields []string
+	bodyHasExplicit := false
 	var bodySchema OpenAPISchema
 	needsBearer := false
 
@@ -374,7 +376,7 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 	handledFields := make(map[string]bool)
 
 	// Process fields based on parse tags (including embedded structs)
-	dg.processFieldsForParameters(t, &parameters, &bodySchema, &bodyFields, &needsBearer, handledFields)
+	dg.processFieldsForParameters(t, &parameters, &bodySchema, &bodyFields, &bodyHasExplicit, &needsBearer, handledFields)
 
 	methodUpper := strings.ToUpper(method)
 
@@ -383,9 +385,11 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 		dg.addDefaultQueryParametersForGET(t, &parameters, handledFields)
 	}
 
-	// Create request body if there are body fields or if it's a POST/PUT/PATCH with struct schema
+	// Create request body if:
+	// - There are explicit body fields (parse:"body:..."), regardless of method
+	// - Or it's a POST/PUT/PATCH with struct schema (default behavior)
 	var requestBody *OpenAPIRequestBody
-	if len(bodyFields) > 0 || ((methodUpper == "POST" || methodUpper == "PUT" || methodUpper == "PATCH") && t.Kind() == reflect.Struct) {
+	if bodyHasExplicit || ((methodUpper == "POST" || methodUpper == "PUT" || methodUpper == "PATCH") && t.Kind() == reflect.Struct) {
 		// Register the schema as a component and use $ref
 		tStruct := t
 		if tStruct.Kind() == reflect.Ptr {
@@ -415,7 +419,7 @@ func (dg *DocsGenerator) generateParametersAndBodyWithSecurity(schema interface{
 }
 
 // processFieldsForParameters processes struct fields (including embedded structs) to extract parameters and body fields
-func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *[]OpenAPIParameter, bodySchema *OpenAPISchema, bodyFields *[]string, needsBearer *bool, handledFields map[string]bool) {
+func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *[]OpenAPIParameter, bodySchema *OpenAPISchema, bodyFields *[]string, bodyHasExplicit *bool, needsBearer *bool, handledFields map[string]bool) {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 
@@ -427,7 +431,7 @@ func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *
 			}
 			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
 				// Recursively process embedded struct
-				dg.processFieldsForParameters(ft, parameters, bodySchema, bodyFields, needsBearer, handledFields)
+				dg.processFieldsForParameters(ft, parameters, bodySchema, bodyFields, bodyHasExplicit, needsBearer, handledFields)
 				continue
 			}
 		}
@@ -507,6 +511,7 @@ func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *
 			}
 			*parameters = append(*parameters, param)
 		case "body":
+			*bodyHasExplicit = true
 			if bodySchema.Properties == nil {
 				*bodySchema = OpenAPISchema{
 					Type:       "object",
@@ -514,11 +519,15 @@ func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *
 					Required:   []string{},
 				}
 			}
-			bodySchema.Properties[key] = dg.convertFieldTypeToSchema(field.Type)
-			if isRequired {
-				bodySchema.Required = append(bodySchema.Required, key)
+			propertyKey := key
+			if jsonName != "" && jsonName != "-" {
+				propertyKey = jsonName
 			}
-			*bodyFields = append(*bodyFields, key)
+			bodySchema.Properties[propertyKey] = dg.convertFieldTypeToSchema(field.Type)
+			if isRequired {
+				bodySchema.Required = append(bodySchema.Required, propertyKey)
+			}
+			*bodyFields = append(*bodyFields, propertyKey)
 		case "auto":
 			if bodySchema.Properties == nil {
 				*bodySchema = OpenAPISchema{
@@ -527,11 +536,15 @@ func (dg *DocsGenerator) processFieldsForParameters(t reflect.Type, parameters *
 					Required:   []string{},
 				}
 			}
-			bodySchema.Properties[key] = dg.convertFieldTypeToSchema(field.Type)
-			if isRequired {
-				bodySchema.Required = append(bodySchema.Required, key)
+			propertyKey := key
+			if jsonName != "" && jsonName != "-" {
+				propertyKey = jsonName
 			}
-			*bodyFields = append(*bodyFields, key)
+			bodySchema.Properties[propertyKey] = dg.convertFieldTypeToSchema(field.Type)
+			if isRequired {
+				bodySchema.Required = append(bodySchema.Required, propertyKey)
+			}
+			*bodyFields = append(*bodyFields, propertyKey)
 		}
 	}
 }
@@ -769,6 +782,12 @@ func (dg *DocsGenerator) ConvertRequestToOpenAPISchema(schema interface{}) OpenA
 				key := sourceKey[1]
 				if source == "body" {
 					fieldName = key
+					if jsonTag != "" && jsonTag != "-" {
+						j := strings.Split(jsonTag, ",")[0]
+						if j != "" {
+							fieldName = j
+						}
+					}
 					include = true
 				}
 			}

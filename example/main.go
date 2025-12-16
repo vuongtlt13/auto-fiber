@@ -196,6 +196,11 @@ type AuthHeaderRequest struct {
 	Authorization string `parse:"header:Authorization" validate:"required" description:"Bearer <token>"`
 }
 
+// BulkDeleteRequest demonstrates DELETE with JSON body using parse:"body:..."
+type BulkDeleteRequest struct {
+	IDs []int `parse:"body:ids" json:"ids" validate:"required,min=1" description:"List of user IDs to delete"`
+}
+
 // ProfileWithJwtOption demonstrates using WithJwtAuth (route-level security) to declare Bearer auth
 func (h *AuthHandler) ProfileWithJwtOption(c *fiber.Ctx) (interface{}, error) {
 	return fiber.Map{
@@ -282,6 +287,11 @@ func (h *AuthHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (*UserRes
 		OrgID:     req.OrgID,
 		CreatedAt: time.Now(),
 	}, nil
+}
+
+// BulkDelete demonstrates DELETE with JSON body (parse:"body:ids")
+func (h *AuthHandler) BulkDelete(c *fiber.Ctx, req *BulkDeleteRequest) (interface{}, error) {
+	return fiber.Map{"deleted": req.IDs}, nil
 }
 
 // Simple handler without request parsing
@@ -627,13 +637,12 @@ func main() {
 	// - Fields without parse tags are treated as path/query only, not body.
 	// - If you really need a DELETE with JSON body (e.g., bulk delete), you MUST use parse:"body:..." on the fields.
 	//
-	// Example (not registered here):
-	//   type BulkDeleteRequest struct {
-	//       IDs []int `parse:"body:ids" json:"ids" validate:"required"`
-	//   }
-	//   app.Delete("/users", handler.BulkDelete,
-	//       autofiber.WithRequestSchema(BulkDeleteRequest{}),
-	//   )
+	// Example registered below: DELETE /users with JSON body { "ids": [1,2] }
+	app.Delete("/users", handler.BulkDelete,
+		autofiber.WithRequestSchema(BulkDeleteRequest{}),
+		autofiber.WithDescription("Bulk delete users using JSON body (parse:\"body:ids\")"),
+		autofiber.WithTags("user", "delete", "bulk"),
+	)
 
 	// Demonstrate GET with RequestSchema that has ONLY json tags (no parse tags).
 	// For this endpoint, when generating the OpenAPI spec:
