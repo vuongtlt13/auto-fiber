@@ -254,17 +254,28 @@ If you want `0` to be a valid value **and** enforce presence, prefer pointer typ
 
 ## Handler Signatures
 
-**Required Signatures for AutoFiber:**
+**Supported Signatures for AutoFiber:**
 
 ```go
 // Standard handler with request parsing: return data and error
+// You can use interface{} or the concrete response schema type
 func (h *Handler) CompleteHandler(c *fiber.Ctx, req *RequestSchema) (interface{}, error) {
     return ResponseSchema{...}, nil
+}
+
+// When using WithResponseSchema, prefer returning the concrete schema type for better type safety
+func (h *Handler) CompleteHandlerTyped(c *fiber.Ctx, req *RequestSchema) (*ResponseSchema, error) {
+    return &ResponseSchema{...}, nil
 }
 
 // Handler without request parsing: return data and error
 func (h *Handler) SimpleHandler(c *fiber.Ctx) (interface{}, error) {
     return ResponseSchema{...}, nil
+}
+
+// When using WithResponseSchema, prefer returning the concrete schema type
+func (h *Handler) SimpleHandlerTyped(c *fiber.Ctx) (*ResponseSchema, error) {
+    return &ResponseSchema{...}, nil
 }
 ```
 
@@ -279,13 +290,16 @@ func (h *Handler) Health(c *fiber.Ctx) error {
 **NOT supported (will cause panic):**
 
 ```go
-// Do not use this signature - AutoFiber requires (interface{}, error) return
+// Do not use this signature - AutoFiber requires (interface{}, error) or (*Schema, error) return
 func (h *Handler) BadHandler(c *fiber.Ctx, req *RequestSchema) error {
     return c.JSON(...)
 }
 ```
 
-> **Note:** AutoFiber requires handlers to return `(interface{}, error)` for automatic JSON marshaling and response validation. The old signature `func(c *fiber.Ctx, req *T) error` is no longer supported.
+> **Note:** 
+> - AutoFiber supports both `(interface{}, error)` and `(*ResponseSchema, error)` return types.
+> - **When using `WithResponseSchema`, prefer returning the concrete schema type** (e.g., `*UserResponse`) instead of `interface{}` for better type safety and clarity.
+> - The old signature `func(c *fiber.Ctx, req *T) error` is no longer supported.
 
 ## JWT Auth: Two Ways to Declare and Enforce Authorization
 

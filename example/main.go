@@ -156,10 +156,11 @@ func (h *AuthHandler) Login(c *fiber.Ctx, req *LoginRequest) (interface{}, error
 
 // Handler with request parsing and response validation
 // This demonstrates the complete flow: parse request -> validate request -> execute handler -> validate response
-func (h *AuthHandler) Register(c *fiber.Ctx, req *RegisterRequest) (interface{}, error) {
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *AuthHandler) Register(c *fiber.Ctx, req *RegisterRequest) (*UserResponse, error) {
 	// req is automatically parsed and validated
-	// return data and error for automatic response formatting and validation
-	return UserResponse{
+	// return concrete schema type for automatic response formatting and validation
+	return &UserResponse{
 		ID:        1,
 		Email:     req.Email,
 		Name:      req.Name,
@@ -171,10 +172,11 @@ func (h *AuthHandler) Register(c *fiber.Ctx, req *RegisterRequest) (interface{},
 }
 
 // Handler with request parsing and response validation
-func (h *AuthHandler) LoginWithValidation(c *fiber.Ctx, req *LoginRequest) (interface{}, error) {
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *AuthHandler) LoginWithValidation(c *fiber.Ctx, req *LoginRequest) (*LoginResponse, error) {
 	// req is automatically parsed and validated
-	// return data and error for automatic response formatting and validation
-	return LoginResponse{
+	// return concrete schema type for automatic response formatting and validation
+	return &LoginResponse{
 		Token: "jwt_token_here",
 		User: UserResponse{
 			ID:        1,
@@ -250,13 +252,14 @@ func (h *AuthHandler) ListUsers(c *fiber.Ctx, req *UserFilterRequest) (interface
 }
 
 // GetUser demonstrates smart parsing (auto-detect source) with response validation
-func (h *AuthHandler) GetUser(c *fiber.Ctx, req *GetUserRequest) (interface{}, error) {
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *AuthHandler) GetUser(c *fiber.Ctx, req *GetUserRequest) (*UserResponse, error) {
 	// Simulate user not found
 	if req.UserID == 999 {
 		return nil, fiber.NewError(fiber.StatusNotFound, "User not found")
 	}
 
-	return UserResponse{
+	return &UserResponse{
 		ID:        req.UserID,
 		Email:     "user@example.com",
 		Name:      "Example User",
@@ -268,8 +271,9 @@ func (h *AuthHandler) GetUser(c *fiber.Ctx, req *GetUserRequest) (interface{}, e
 }
 
 // CreateUser demonstrates parsing from path, query, headers, and body with response validation
-func (h *AuthHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (interface{}, error) {
-	return UserResponse{
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *AuthHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (*UserResponse, error) {
+	return &UserResponse{
 		ID:        1,
 		Email:     req.Email,
 		Name:      req.Name,
@@ -286,8 +290,9 @@ func (h *AuthHandler) Health(c *fiber.Ctx) error {
 }
 
 // Handler for single user with generic response
-func (h *AuthHandler) GetUserGeneric(c *fiber.Ctx) (interface{}, error) {
-	return APIResponse[User]{
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *AuthHandler) GetUserGeneric(c *fiber.Ctx) (*APIResponse[User], error) {
+	return &APIResponse[User]{
 		Code:    200,
 		Message: "success",
 		Data:    User{ID: 1, Name: "Alice"},
@@ -295,8 +300,9 @@ func (h *AuthHandler) GetUserGeneric(c *fiber.Ctx) (interface{}, error) {
 }
 
 // Handler for user list with generic response
-func (h *AuthHandler) ListUsersGeneric(c *fiber.Ctx) (interface{}, error) {
-	return APIResponse[UserList]{
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *AuthHandler) ListUsersGeneric(c *fiber.Ctx) (*APIResponse[UserList], error) {
+	return &APIResponse[UserList]{
 		Code:    200,
 		Message: "success",
 		Data:    UserList{Users: []User{{ID: 1, Name: "Alice"}, {ID: 2, Name: "Bob"}}},
@@ -323,8 +329,9 @@ func (h *AuthHandler) GetUserPointerToGeneric(c *fiber.Ctx) (*APIResponse[*User]
 
 type UserHandler struct{}
 
-func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (interface{}, error) {
-	return UserResponse{
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (*UserResponse, error) {
+	return &UserResponse{
 		ID:        2,
 		Email:     req.Email,
 		Name:      req.Name,
@@ -335,7 +342,8 @@ func (h *UserHandler) CreateSimpleUser(c *fiber.Ctx, req *SimpleUserRequest) (in
 	}, nil
 }
 
-func (h *UserHandler) CreateUserFromMap(c *fiber.Ctx) (interface{}, error) {
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *UserHandler) CreateUserFromMap(c *fiber.Ctx) (*UserResponse, error) {
 	// Example of parsing from map
 	userData := map[string]interface{}{
 		"email":     "john@example.com",
@@ -350,7 +358,7 @@ func (h *UserHandler) CreateUserFromMap(c *fiber.Ctx) (interface{}, error) {
 		return nil, err
 	}
 
-	return UserResponse{
+	return &UserResponse{
 		ID:        3,
 		Email:     req.Email,
 		Name:      req.Name,
@@ -482,8 +490,9 @@ type EmbeddedUserResponse struct {
 	PhoneNumber string    `json:"phoneNumber" description:"Phone number"`
 }
 
-func (h *UserHandler) CreateEmbeddedUser(c *fiber.Ctx, req *CreateUserWithEmbeddedRequest) (interface{}, error) {
-	return EmbeddedUserResponse{
+// When using WithResponseSchema, you can return the concrete schema type instead of interface{}
+func (h *UserHandler) CreateEmbeddedUser(c *fiber.Ctx, req *CreateUserWithEmbeddedRequest) (*EmbeddedUserResponse, error) {
+	return &EmbeddedUserResponse{
 		UserBase:    req.UserBase,
 		Address:     req.Address,
 		CreatedAt:   time.Now(),
@@ -680,9 +689,9 @@ func main() {
 	app.ServeSwaggerUI("/swagger", "/docs")
 
 	// Start server with log
-	log.Println("Server is running at http://localhost:3000")
-	log.Println("API Documentation: http://localhost:3000/docs")
-	log.Println("Swagger UI: http://localhost:3000/swagger")
+	log.Println("Server is running at http://localhost:3123")
+	log.Println("API Documentation: http://localhost:3123/docs")
+	log.Println("Swagger UI: http://localhost:3123/swagger")
 	log.Println("")
 	log.Println("Complete Flow Examples:")
 	log.Println("- POST /auth/register: Parse request -> Validate request -> Execute handler -> Validate response")

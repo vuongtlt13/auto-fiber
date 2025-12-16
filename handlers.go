@@ -9,9 +9,10 @@ import (
 )
 
 // createHandlerWithOptions returns a handler with the given options.
-// Only two handler signatures are supported:
-// 1. func(*fiber.Ctx) (interface{}, error) -- for endpoints without request schema
-// 2. func(*fiber.Ctx, req *T) (interface{}, error) -- for endpoints with request schema
+// Supported handler signatures:
+// 1. func(*fiber.Ctx) (interface{}, error) or (*ResponseSchema, error) -- for endpoints without request schema
+// 2. func(*fiber.Ctx, req *T) (interface{}, error) or (*ResponseSchema, error) -- for endpoints with request schema
+// When WithResponseSchema is provided, you can return the concrete schema type instead of interface{}.
 // All other signatures will panic.
 func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOptions) fiber.Handler {
 	handlerType := reflect.TypeOf(handler)
@@ -21,7 +22,7 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 	}
 
 	if opts.RequestSchema == nil {
-		// Only allow func(*fiber.Ctx) (interface{}, error)
+		// Allow func(*fiber.Ctx) (interface{}, error) or (*ResponseSchema, error)
 		if handlerType.NumIn() == 1 && handlerType.NumOut() == 2 {
 			return func(c *fiber.Ctx) error {
 				// Enforce Authorization header when JWT auth is required (no request schema to validate it)
@@ -44,10 +45,10 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 				return c.JSON(data)
 			}
 		}
-		panic("Handler must be func(*fiber.Ctx) (interface{}, error) when no request schema is provided")
+		panic("Handler must be func(*fiber.Ctx) (interface{}, error) or (*ResponseSchema, error) when no request schema is provided")
 	}
 
-	// With request schema: only allow func(*fiber.Ctx, req *T) (interface{}, error)
+	// With request schema: allow func(*fiber.Ctx, req *T) (interface{}, error) or (*ResponseSchema, error)
 	if handlerType.NumIn() == 2 && handlerType.NumOut() == 2 {
 		return func(c *fiber.Ctx) error {
 			// Parse and validate request
@@ -118,5 +119,5 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 		}
 	}
 
-	panic("Handler must be func(*fiber.Ctx) (interface{}, error) or func(*fiber.Ctx, req *T) (interface{}, error)")
+	panic("Handler must be func(*fiber.Ctx) (interface{}, error) or (*ResponseSchema, error), or func(*fiber.Ctx, req *T) (interface{}, error) or (*ResponseSchema, error)")
 }
