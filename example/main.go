@@ -622,6 +622,19 @@ func main() {
 		autofiber.WithTags("user"),
 	)
 
+	// Note on DELETE semantics:
+	// - By default, DELETE requests are modeled without a request body.
+	// - Fields without parse tags are treated as path/query only, not body.
+	// - If you really need a DELETE with JSON body (e.g., bulk delete), you MUST use parse:"body:..." on the fields.
+	//
+	// Example (not registered here):
+	//   type BulkDeleteRequest struct {
+	//       IDs []int `parse:"body:ids" json:"ids" validate:"required"`
+	//   }
+	//   app.Delete("/users", handler.BulkDelete,
+	//       autofiber.WithRequestSchema(BulkDeleteRequest{}),
+	//   )
+
 	// Demonstrate GET with RequestSchema that has ONLY json tags (no parse tags).
 	// For this endpoint, when generating the OpenAPI spec:
 	//   - All fields in GetUserFilterRequest will be treated as query parameters.

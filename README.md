@@ -340,6 +340,24 @@ app.Get("/profile",
 - Any route with JWT (either method) gets `security: [{"bearerAuth": []}]` and the `bearerAuth` scheme is added to `components.securitySchemes`.
 - Users can click **Authorize** and enter a Bearer token once; it applies to all secured routes.
 
+## HTTP Methods and Request Bodies (DELETE behavior)
+
+AutoFiber aligns request body handling with common HTTP API practices:
+
+- **GET, DELETE, HEAD, OPTIONS**:
+  - By default, **no request body** is generated in OpenAPI (no `requestBody`), even if your request schema is a struct.
+  - Fields without `parse` tags are treated as **path/query parameters only**, not body.
+  - If you want a body for these methods (e.g., a bulk DELETE), you **must explicitly use** `parse:"body:..."` on the fields you want in the body.
+
+- **POST, PUT, PATCH**:
+  - If the request schema is a struct and you don't specify `parse:"body:..."`, AutoFiber will:
+    - Treat struct fields as coming from the body by default (unless a `parse` tag says otherwise).
+    - Generate a `requestBody` in OpenAPI pointing to the struct schema.
+
+This means:
+- `DELETE /resource/:id` is typically modeled with **path + query** only (no body).
+- Advanced patterns like `DELETE /resources` with a JSON body for bulk operations are supported, but require **explicit** `parse:"body:..."` tags on the relevant fields.
+
 ## Documentation
 
 - [docs/README.md](docs/README.md) - Documentation index & guides
