@@ -2,8 +2,10 @@ package autofiber_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -149,6 +151,43 @@ func TestAutoFiber_All(t *testing.T) {
 	resp, err = app.Test(req)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAutoFiber_DownloadFileResponse(t *testing.T) {
+	app := newTestApp()
+
+	// Prepare a temporary file to download
+	tmpFile, err := os.CreateTemp("", "autofiber-download-*.txt")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	content := []byte("hello auto-fiber download")
+	_, err = tmpFile.Write(content)
+	assert.NoError(t, err)
+	assert.NoError(t, tmpFile.Close())
+
+	app.Get("/download", func(c *fiber.Ctx) (interface{}, error) {
+		return autofiber.DownloadFile{
+			Path:     tmpFile.Name(),
+			FileName: "test-download.txt",
+			Inline:   false,
+		}, nil
+	}, autofiber.WithDescription("Download file response"))
+
+	req := httptest.NewRequest(http.MethodGet, "/download", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Read response body and ensure it matches file content
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, content, body)
+
+	// Ensure Content-Disposition header indicates attachment with suggested filename
+	disposition := resp.Header.Get("Content-Disposition")
+	assert.Contains(t, disposition, "attachment")
+	assert.Contains(t, disposition, "test-download.txt")
 }
 
 // =============================================================================

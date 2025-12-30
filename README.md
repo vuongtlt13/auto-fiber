@@ -15,6 +15,7 @@ A FastAPI-like wrapper for the Fiber web framework in Go, providing automatic re
 - **⚙️ Route Options**: Flexible route configuration with options pattern
 - **🔌 Middleware Integration**: Seamless integration with Fiber middleware
 - **🎯 Clean Architecture**: Modular design with separate concerns
+- **📁 File Download Support**: Return file download responses (e.g., CSV) via a dedicated `FileResponse` type, bypassing JSON
 - **OpenAPI Schema Naming & Generic Response**:
   - **Schema Naming:** AutoFiber generates OpenAPI schema names that are RFC3986-compliant. For generic structs, the schema name will be in the form `APIResponse_User` (for `APIResponse[User]`). For non-generic structs, the schema name is simply the type name (e.g., `LoginResponse`).
   - **Generic Response Support:** You can use generic response wrappers for consistent API responses. Example:
@@ -357,6 +358,100 @@ AutoFiber aligns request body handling with common HTTP API practices:
 This means:
 - `DELETE /resource/:id` is typically modeled with **path + query** only (no body).
 - Advanced patterns like `DELETE /resources` with a JSON body for bulk operations are supported, but require **explicit** `parse:"body:..."` tags on the relevant fields.
+
+## File Download Responses (CSV, PDF, etc.)
+
+Sometimes an endpoint should return a **file** instead of JSON (e.g., CSV export, PDF report).  
+AutoFiber supports this via a small interface so that handlers can return a "file response"
+instead of regular JSON data.
+
+### Core types
+
+In the library:
+
+```go
+type FileResponse interface {
+    // Implementations write the file response to the Fiber context.
+    SendFileResponse(c *fiber.Ctx) error
+}
+
+// DownloadFile is a built-in implementation that uses Fiber's SendFile/Download.
+type DownloadFile struct {
+    Path     string // required: path to file on disk
+    FileName string // optional: suggested name for download
+    Inline   bool   // false => attachment (Download), true => inline (SendFile)
+}
+```
+
+In `handlers.go`, AutoFiber detects any value that implements `FileResponse`:
+
+```go
+// After calling your handler and before JSON/validation:
+if fr, ok := data.(FileResponse); ok {
+    // Bypass JSON and response validation, send file directly
+    return fr.SendFileResponse(c)
+}
+```
+
+This works for both:
+
+- `func(*fiber.Ctx) (interface{}, error)`
+- `func(*fiber.Ctx, req *T) (interface{}, error)`
+
+### Example: Export users as CSV (from example app)
+
+Handler:
+
+```go
+// DownloadUsersCSV demonstrates returning a file download response (CSV) using AutoFiber.
+// Example:
+//   GET /users/export -> attachment; filename="users.csv"
+func (h *AuthHandler) DownloadUsersCSV(c *fiber.Ctx) (interface{}, error) {
+    const filePath = "./users.csv"
+
+    // Demo content; in a real app you would generate this from a DB.
+    content := "id,email,name,role\n" +
+        "1,user1@example.com,User 1,user\n" +
+        "2,user2@example.com,User 2,admin\n"
+
+    if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+        return nil, err
+    }
+
+    return autofiber.DownloadFile{
+        Path:     filePath,
+        FileName: "users.csv",
+        Inline:   false, // false => browser downloads as attachment
+    }, nil
+}
+```
+
+Route:
+
+```go
+userGroup := app.Group("/users")
+
+// IMPORTANT: Specific routes (like /export, /filters) must be registered BEFORE
+// dynamic routes (like /:user_id) to avoid route conflicts. Fiber matches routes
+// in order, and /:user_id would match /export if registered first.
+
+userGroup.Get("/export", handler.DownloadUsersCSV,
+    autofiber.WithDescription("Export users as CSV file (file download response)"),
+    autofiber.WithTags("user", "export", "file"),
+)
+
+// Other specific routes...
+userGroup.Get("/filters", handler.ListUsersWithFilters, ...)
+
+// Dynamic route must be last
+userGroup.Get("/:user_id", handler.GetUserByID, ...)
+```
+
+Notes:
+
+- **Docs / OpenAPI**: AutoFiber still documents this as a normal `GET` operation (e.g., with `200` response), because file streaming is runtime behavior. You can add a description like `"Returns CSV file"` to make it explicit.
+- **Response validation**: when a `FileResponse` is returned, response validation (`WithResponseSchema`) is **skipped** for that request.
+- **JWT / auth**: All existing auth rules (`WithJwtAuth`, schema-inferred JWT) still apply; `FileResponse` only changes how the successful response is sent.
 
 ## Documentation
 

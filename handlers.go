@@ -36,6 +36,12 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 				if err != nil {
 					return err
 				}
+
+				// If handler returned a FileResponse, send file directly (no JSON / validation).
+				if fr, ok := data.(FileResponse); ok {
+					return fr.SendFileResponse(c)
+				}
+
 				// Validate response if schema is set
 				if opts.ResponseSchema != nil {
 					c.Locals("response_schema", opts.ResponseSchema)
@@ -109,6 +115,12 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 			if err != nil {
 				return err
 			}
+
+			// If handler returned a FileResponse, send file directly (no JSON / validation).
+			if fr, ok := data.(FileResponse); ok {
+				return fr.SendFileResponse(c)
+			}
+
 			// Validate response if schema is set
 			if opts.ResponseSchema != nil {
 				c.Locals("response_schema", opts.ResponseSchema)

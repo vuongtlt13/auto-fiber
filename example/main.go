@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -292,6 +293,37 @@ func (h *AuthHandler) CreateUser(c *fiber.Ctx, req *CreateUserRequest) (*UserRes
 // BulkDelete demonstrates DELETE with JSON body (parse:"body:ids")
 func (h *AuthHandler) BulkDelete(c *fiber.Ctx, req *BulkDeleteRequest) (interface{}, error) {
 	return fiber.Map{"deleted": req.IDs}, nil
+}
+
+// DownloadUsersCSV demonstrates returning a file download response (CSV) using AutoFiber.
+// This uses the FileResponse/DownloadFile support added to the core library.
+//
+// Behavior:
+//   - Handler returns an autofiber.DownloadFile value from the handler.
+//   - AutoFiber detects the FileResponse and calls c.Download() directly (no JSON / response validation).
+//   - The CSV file is written (or reused) on disk before being sent.
+//
+// Example:
+//   GET /users/export
+//   -> Response: attachment; filename="users.csv" with CSV content
+func (h *AuthHandler) DownloadUsersCSV(c *fiber.Ctx) (interface{}, error) {
+	const filePath = "./users.csv"
+
+	// For demo purposes, (re)create a small CSV file on each request.
+	// In a real app, you would likely stream or generate this from a DB.
+	content := "id,email,name,role\n" +
+		"1,user1@example.com,User 1,user\n" +
+		"2,user2@example.com,User 2,admin\n"
+
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		return nil, err
+	}
+
+	return autofiber.DownloadFile{
+		Path:     filePath,
+		FileName: "users.csv",
+		Inline:   false, // false => tell browser to download as attachment
+	}, nil
 }
 
 // Simple handler without request parsing
@@ -619,12 +651,6 @@ func main() {
 		autofiber.WithDescription("List users with filtering, pagination, and authentication"),
 		autofiber.WithTags("user", "admin"),
 	)
-	userGroup.Get("/:user_id", handler.GetUser,
-		autofiber.WithRequestSchema(GetUserRequest{}),
-		autofiber.WithResponseSchema(UserResponse{}),
-		autofiber.WithDescription("Get user by ID with smart parsing and response validation"),
-		autofiber.WithTags("user", "admin"),
-	)
 	userGroup.Post("/", userHandler.CreateSimpleUser,
 		autofiber.WithRequestSchema(SimpleUserRequest{}),
 		autofiber.WithResponseSchema(UserResponse{}),
@@ -642,6 +668,19 @@ func main() {
 		autofiber.WithRequestSchema(BulkDeleteRequest{}),
 		autofiber.WithDescription("Bulk delete users using JSON body (parse:\"body:ids\")"),
 		autofiber.WithTags("user", "delete", "bulk"),
+	)
+
+	// IMPORTANT: Specific routes (like /export, /filters) must be registered BEFORE
+	// dynamic routes (like /:user_id) to avoid route conflicts. Fiber matches routes in order,
+	// and /:user_id would match /export if registered first.
+	//
+	// Example: download a CSV file using AutoFiber's FileResponse support.
+	// The handler returns autofiber.DownloadFile, and AutoFiber calls c.Download() internally.
+	// Swagger/OpenAPI will still show this as a standard GET operation, but the actual
+	// response is a file stream instead of JSON.
+	userGroup.Get("/export", handler.DownloadUsersCSV,
+		autofiber.WithDescription("Export users as CSV file (file download response)"),
+		autofiber.WithTags("user", "export", "file"),
 	)
 
 	// Demonstrate GET with RequestSchema that has ONLY json tags (no parse tags).
@@ -664,6 +703,14 @@ func main() {
 		autofiber.WithRequestSchema(GetUserFilterRequest{}),
 		autofiber.WithDescription("List users using GET with filters inferred from JSON tags (no parse tags)"),
 		autofiber.WithTags("user", "filters", "example"),
+	)
+
+	// Dynamic route with path parameter - must be registered AFTER specific routes
+	userGroup.Get("/:user_id", handler.GetUser,
+		autofiber.WithRequestSchema(GetUserRequest{}),
+		autofiber.WithResponseSchema(UserResponse{}),
+		autofiber.WithDescription("Get user by ID with smart parsing and response validation"),
+		autofiber.WithTags("user", "admin"),
 	)
 	userGroup.Post("/from-map", userHandler.CreateUserFromMap,
 		autofiber.WithResponseSchema(UserResponse{}),
