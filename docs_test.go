@@ -2229,3 +2229,116 @@ func TestUserDataTableResult_GenericResponse_SchemaRegistration(t *testing.T) {
 		assert.Contains(t, recordSchema.Properties, field, "UserRecord schema should contain field %s", field)
 	}
 }
+
+func TestConvertResponseToOpenAPISchema_NonStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	// Non-struct input should return {type: "object"}
+	schema := dg.ConvertResponseToOpenAPISchema("not a struct")
+	assert.Equal(t, "object", schema.Type)
+	assert.Nil(t, schema.Properties)
+}
+
+func TestConvertResponseToOpenAPISchema_PtrToStruct(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Item struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name"`
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(&Item{})
+	assert.Equal(t, "object", schema.Type)
+	assert.Contains(t, schema.Properties, "id")
+	assert.Contains(t, schema.Properties, "name")
+}
+
+func TestConvertResponseToOpenAPISchema_JsonDashSkip(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Response struct {
+		ID     int    `json:"id"`
+		Secret string `json:"-"` // should be skipped
+		Name   string `json:"name"`
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(Response{})
+	assert.Contains(t, schema.Properties, "id")
+	assert.Contains(t, schema.Properties, "name")
+	assert.NotContains(t, schema.Properties, "Secret")
+	assert.NotContains(t, schema.Properties, "-")
+}
+
+func TestConvertResponseToOpenAPISchema_SliceField(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Tag struct {
+		Label string `json:"label"`
+	}
+	type Article struct {
+		Title string `json:"title"`
+		Tags  []Tag  `json:"tags"`
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(Article{})
+	assert.Contains(t, schema.Properties, "title")
+	assert.Contains(t, schema.Properties, "tags")
+	// Tag schema should be registered
+	assert.Contains(t, dg.Schemas(), "Tag")
+}
+
+func TestGetSchemaNameFromRef_NoPrefix(t *testing.T) {
+	assert.Equal(t, "MySchema", autofiber.GetSchemaNameFromRef("#/components/schemas/MySchema"))
+	assert.Equal(t, "", autofiber.GetSchemaNameFromRef(""))
+	assert.Equal(t, "bare-name", autofiber.GetSchemaNameFromRef("bare-name"))
+}
+
+func TestConvertResponseToOpenAPISchema_SliceOfPtrs(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Comment struct {
+		Text string `json:"text"`
+	}
+	type Post struct {
+		Title    string     `json:"title"`
+		Comments []*Comment `json:"comments"`
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(Post{})
+	assert.Contains(t, schema.Properties, "title")
+	assert.Contains(t, schema.Properties, "comments")
+	// Comment schema should be registered via the slice-of-ptr path
+	assert.Contains(t, dg.Schemas(), "Comment")
+}
+
+func TestConvertResponseToOpenAPISchema_DescriptionAndExample(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Product struct {
+		ID    int    `json:"id" validate:"required" description:"Product ID" example:"42"`
+		Name  string `json:"name" description:"Product name"`
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(Product{})
+	assert.Contains(t, schema.Properties, "id")
+	assert.Equal(t, "Product ID", schema.Properties["id"].Description)
+	assert.Equal(t, "42", schema.Properties["id"].Example)
+	assert.Contains(t, schema.Properties, "name")
+}
+
+func TestConvertResponseToOpenAPISchema_EmbeddedPtr(t *testing.T) {
+	dg := autofiber.NewDocsGenerator()
+
+	type Base struct {
+		CreatedAt string `json:"created_at"`
+	}
+	type Entity struct {
+		*Base
+		ID int `json:"id" validate:"required"`
+	}
+
+	schema := dg.ConvertResponseToOpenAPISchema(Entity{})
+	// Embedded ptr struct fields should be flattened
+	assert.Contains(t, schema.Properties, "id")
+	assert.Contains(t, schema.Properties, "created_at")
+}

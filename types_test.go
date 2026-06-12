@@ -24,6 +24,26 @@ func TestRouteOptions_Struct(t *testing.T) {
 	assert.Equal(t, []string{"test"}, options.Tags)
 }
 
+func TestValidateStruct_Valid(t *testing.T) {
+	type User struct {
+		Email string `validate:"required,email"`
+		Age   int    `validate:"gte=18"`
+	}
+	u := &User{Email: "test@example.com", Age: 20}
+	err := autofiber.ValidateStruct(u)
+	assert.NoError(t, err)
+}
+
+func TestValidateStruct_Invalid(t *testing.T) {
+	type User struct {
+		Email string `validate:"required,email"`
+		Age   int    `validate:"gte=18"`
+	}
+	u := &User{Email: "not-an-email", Age: 10}
+	err := autofiber.ValidateStruct(u)
+	assert.Error(t, err)
+}
+
 func TestParseSource_Constants_Types(t *testing.T) {
 	assert.Equal(t, autofiber.ParseSource("body"), autofiber.Body)
 	assert.Equal(t, autofiber.ParseSource("query"), autofiber.Query)

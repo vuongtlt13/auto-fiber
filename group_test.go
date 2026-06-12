@@ -149,6 +149,98 @@ func TestGroup_Use(t *testing.T) {
 	assert.True(t, called)
 }
 
+func TestGroup_WithMiddleware(t *testing.T) {
+	af, group := setupGroup()
+
+	called := false
+	group.WithMiddleware(func(c *fiber.Ctx) error {
+		called = true
+		return c.Next()
+	})
+	group.Get("/mw", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/mw", nil)
+	resp, err := af.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, called)
+}
+
+func TestGroup_WithMiddleware_Chaining(t *testing.T) {
+	af, group := setupGroup()
+
+	order := []string{}
+	group.WithMiddleware(func(c *fiber.Ctx) error {
+		order = append(order, "first")
+		return c.Next()
+	}).WithMiddleware(func(c *fiber.Ctx) error {
+		order = append(order, "second")
+		return c.Next()
+	})
+	group.Get("/chain", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chain", nil)
+	resp, err := af.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, []string{"first", "second"}, order)
+}
+
+func TestGroup_WithJwtAuth(t *testing.T) {
+	af, group := setupGroup()
+	group.WithJwtAuth()
+
+	type Req struct {
+		Authorization string `parse:"header:Authorization,required" json:"-"`
+		Name          string `json:"name"`
+	}
+	group.Get("/protected", func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return fiber.Map{"name": req.Name}, nil
+	}, autofiber.WithRequestSchema(Req{}))
+
+	// Missing auth header — should fail validation
+	req := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
+	resp, err := af.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestGroup_WithJwtAuth_OpenAPISpec(t *testing.T) {
+	af, group := setupGroup()
+	group.WithJwtAuth()
+	group.Get("/secure", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	})
+
+	spec := af.GetOpenAPISpec()
+	assert.NotNil(t, spec)
+	// WithJwtAuth marks the group but route-level JWT auth is reflected in the spec
+	path, exists := spec.Paths["/api/secure"]
+	assert.True(t, exists)
+	assert.NotNil(t, path.Get)
+}
+
+func TestGroup_MergeOpts_JwtAuthOnly(t *testing.T) {
+	af, group := setupGroup()
+	group.WithJwtAuth() // No middleware — tests the JWT-only branch of mergeOpts
+
+	type Req struct {
+		Authorization string `parse:"header:Authorization,required" json:"-"`
+	}
+	group.Get("/jwt-only", func(c *fiber.Ctx, req *Req) (interface{}, error) {
+		return "ok", nil
+	}, autofiber.WithRequestSchema(Req{}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jwt-only", nil)
+	resp, err := af.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
 func TestGroup_Docs_AddRoute(t *testing.T) {
 	af, group := setupGroup()
 

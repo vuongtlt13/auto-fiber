@@ -70,6 +70,76 @@ func TestValidateResponseData_WithUnsupportedMapType(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported map type")
 }
 
+func TestValidateResponseData_WithPtr(t *testing.T) {
+	type Item struct {
+		ID   int    `validate:"required"`
+		Name string `validate:"required"`
+	}
+
+	validator := GetValidator()
+
+	// ptr to struct — should dereference and validate
+	data := &Item{ID: 1, Name: "test"}
+	err := validateResponseData(data, Item{}, validator)
+	assert.NoError(t, err)
+
+	// ptr to invalid struct
+	data = &Item{ID: 1}
+	err = validateResponseData(data, Item{}, validator)
+	assert.Error(t, err)
+}
+
+func TestValidateResponseData_SliceEmpty(t *testing.T) {
+	type Item struct {
+		ID int `validate:"required"`
+	}
+	validator := GetValidator()
+
+	// empty slice — should pass with no error
+	var data []Item
+	err := validateResponseData(data, Item{}, validator)
+	assert.NoError(t, err)
+}
+
+func TestValidateResponseData_CustomMapType(t *testing.T) {
+	type S struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+	validator := GetValidator()
+
+	// map[string]interface{} that doesn't match schema key
+	customMap := map[string]interface{}{"id": 1, "name": "ok"}
+	err := validateResponseData(customMap, S{}, validator)
+	assert.NoError(t, err)
+}
+
+func TestValidateResponseData_PtrSchema(t *testing.T) {
+	type Item struct {
+		ID   int    `json:"id" validate:"required"`
+		Name string `json:"name" validate:"required"`
+	}
+	validator := GetValidator()
+
+	// Pass a *Item as schema (ptr schema case)
+	data := map[string]interface{}{"id": 1, "name": "test"}
+	err := validateResponseData(data, &Item{}, validator)
+	assert.NoError(t, err)
+}
+
+func TestValidateResponseData_MapParseFromMapFail(t *testing.T) {
+	type Item struct {
+		ID int `json:"id" validate:"required"`
+	}
+	validator := GetValidator()
+
+	// Pass a map with a value type incompatible with the field ([]string for int)
+	// This causes ParseFromMap → setFieldValue to return an error
+	data := map[string]interface{}{"id": []string{"not-int"}}
+	err := validateResponseData(data, Item{}, validator)
+	assert.Error(t, err)
+}
+
 func TestValidateResponseData_WithComplexMapTypes(t *testing.T) {
 	type ValidStruct struct {
 		ID   int    `json:"id" validate:"required"`

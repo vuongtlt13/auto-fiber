@@ -137,6 +137,30 @@ func TestGetParsedRequest(t *testing.T) {
 	assert.Equal(t, "test", respBody["name"])
 }
 
+func TestGetParsedRequest_NilWhenNotSet(t *testing.T) {
+	type Req struct {
+		Name string
+	}
+
+	af := newTestApp()
+	af.Get("/nil", func(c *fiber.Ctx) (interface{}, error) {
+		// No "parsed_request" local set — should return nil
+		parsed := autofiber.GetParsedRequest[Req](c)
+		if parsed != nil {
+			return fiber.Map{"found": true}, nil
+		}
+		return fiber.Map{"found": false}, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/nil", nil)
+	resp, err := af.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	var body map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	assert.Equal(t, false, body["found"])
+}
+
 // =============================================================================
 // GROUP 2: FOCUS ON VALIDATION (COMBINED WITH PARSING)
 // =============================================================================

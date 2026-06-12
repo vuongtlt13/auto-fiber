@@ -92,6 +92,50 @@ func TestGetFieldKey_ErrorCases(t *testing.T) {
 	assert.Equal(t, "B", key)
 }
 
+func TestParseFromMapInternal_EmbeddedPtrStruct(t *testing.T) {
+	type Address struct {
+		Street string `json:"street"`
+		City   string `json:"city"`
+	}
+	type Person struct {
+		Name    string   `json:"name"`
+		Address *Address // embedded ptr
+	}
+
+	data := map[string]interface{}{
+		"name":   "Alice",
+		"street": "123 Main St",
+		"city":   "Springfield",
+	}
+	p := &Person{}
+	err := parseFromMapInternal(data, p)
+	assert.NoError(t, err)
+	assert.Equal(t, "Alice", p.Name)
+	// Address is not anonymous (not embedded), so street/city won't be set here
+	// This test verifies it doesn't panic on ptr fields
+}
+
+func TestParseFromMapInternal_AnonymousEmbeddedPtr(t *testing.T) {
+	type Base struct {
+		Role string `json:"role"`
+	}
+	type User struct {
+		*Base
+		Name string `json:"name"`
+	}
+
+	data := map[string]interface{}{
+		"name": "Bob",
+		"role": "admin",
+	}
+	u := &User{}
+	err := parseFromMapInternal(data, u)
+	assert.NoError(t, err)
+	assert.Equal(t, "Bob", u.Name)
+	assert.NotNil(t, u.Base)
+	assert.Equal(t, "admin", u.Role)
+}
+
 func TestSetFieldValue_ErrorCases(t *testing.T) {
 	var s struct {
 		I int

@@ -190,6 +190,65 @@ func TestAutoFiber_DownloadFileResponse(t *testing.T) {
 	assert.Contains(t, disposition, "test-download.txt")
 }
 
+func TestAutoFiber_DownloadFileResponse_NoFileName(t *testing.T) {
+	app := newTestApp()
+
+	tmpFile, err := os.CreateTemp("", "autofiber-noname-*.txt")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	content := []byte("no filename download")
+	_, err = tmpFile.Write(content)
+	assert.NoError(t, err)
+	assert.NoError(t, tmpFile.Close())
+
+	app.Get("/dl-noname", func(c *fiber.Ctx) (interface{}, error) {
+		return autofiber.DownloadFile{
+			Path:     tmpFile.Name(),
+			FileName: "",
+			Inline:   false,
+		}, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/dl-noname", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, content, body)
+}
+
+func TestAutoFiber_DownloadFileResponse_Inline(t *testing.T) {
+	app := newTestApp()
+
+	tmpFile, err := os.CreateTemp("", "autofiber-inline-*.txt")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	content := []byte("inline file content")
+	_, err = tmpFile.Write(content)
+	assert.NoError(t, err)
+	assert.NoError(t, tmpFile.Close())
+
+	app.Get("/inline", func(c *fiber.Ctx) (interface{}, error) {
+		return autofiber.DownloadFile{
+			Path:   tmpFile.Name(),
+			Inline: true,
+		}, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/inline", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, content, body)
+}
+
 // =============================================================================
 // ROUTES WITH REQUEST SCHEMA TESTS
 // =============================================================================
@@ -500,4 +559,110 @@ func TestAutoFiber_ComplexRoute_WithAllOptions(t *testing.T) {
 	resp, err := app.Test(req)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// =============================================================================
+// ROUTES WITH MIDDLEWARE — missing methods (Get/Post/Patch/Head/Options/All)
+// =============================================================================
+
+func TestAutoFiber_Get_WithMiddleware(t *testing.T) {
+	app := newTestApp()
+	called := false
+	app.Get("/mw-get", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	}, autofiber.WithMiddleware(func(c *fiber.Ctx) error {
+		called = true
+		return c.Next()
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/mw-get", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, called)
+}
+
+func TestAutoFiber_Post_WithMiddleware(t *testing.T) {
+	app := newTestApp()
+	called := false
+	app.Post("/mw-post", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	}, autofiber.WithMiddleware(func(c *fiber.Ctx) error {
+		called = true
+		return c.Next()
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/mw-post", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, called)
+}
+
+func TestAutoFiber_Patch_WithMiddleware(t *testing.T) {
+	app := newTestApp()
+	called := false
+	app.Patch("/mw-patch", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	}, autofiber.WithMiddleware(func(c *fiber.Ctx) error {
+		called = true
+		return c.Next()
+	}))
+
+	req := httptest.NewRequest(http.MethodPatch, "/mw-patch", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, called)
+}
+
+func TestAutoFiber_Head_WithMiddleware(t *testing.T) {
+	app := newTestApp()
+	called := false
+	app.Head("/mw-head", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	}, autofiber.WithMiddleware(func(c *fiber.Ctx) error {
+		called = true
+		return c.Next()
+	}))
+
+	req := httptest.NewRequest(http.MethodHead, "/mw-head", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, called)
+}
+
+func TestAutoFiber_Options_WithMiddleware(t *testing.T) {
+	app := newTestApp()
+	called := false
+	app.Options("/mw-options", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	}, autofiber.WithMiddleware(func(c *fiber.Ctx) error {
+		called = true
+		return c.Next()
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/mw-options", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, called)
+}
+
+func TestAutoFiber_All_WithMiddleware(t *testing.T) {
+	app := newTestApp()
+	called := false
+	app.All("/mw-all", func(c *fiber.Ctx) (interface{}, error) {
+		return "ok", nil
+	}, autofiber.WithMiddleware(func(c *fiber.Ctx) error {
+		called = true
+		return c.Next()
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/mw-all", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, called)
 }
