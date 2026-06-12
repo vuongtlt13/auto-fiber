@@ -56,20 +56,20 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 
 	// With request schema: allow func(*fiber.Ctx, req *T) (interface{}, error) or (*ResponseSchema, error)
 	if handlerType.NumIn() == 2 && handlerType.NumOut() == 2 {
+		// Build the parse middleware once at registration time (not per request).
+		parseMiddleware := AutoParseRequest(opts.RequestSchema, af.validator)
 		return func(c *fiber.Ctx) error {
-			// Parse and validate request
-			parseMiddleware := AutoParseRequest(opts.RequestSchema, af.validator)
 			if err := parseMiddleware(c); err != nil {
 				// Handle parse errors
 				if parseErr, ok := err.(*ParseError); ok {
-					return &ValidationRequestError{
+					return af.handleError(c, &ValidationRequestError{
 						Message: "Invalid request",
 						Details: []FieldErrorDetail{{
 							Field:   parseErr.Field,
 							Message: parseErr.Message,
 							Tag:     "parse",
 						}},
-					}
+					})
 				}
 
 				// If JWT auth is required and Authorization header is missing -> 401
@@ -87,20 +87,18 @@ func (af *AutoFiber) createHandlerWithOptions(handler interface{}, opts *RouteOp
 							Tag:     verr.Tag(),
 						})
 					}
-					return &ValidationRequestError{
+					return af.handleError(c, &ValidationRequestError{
 						Message: "Validation failed",
 						Details: details,
-					}
+					})
 				}
-				// Unknown error
-				return &ValidationRequestError{
+				return af.handleError(c, &ValidationRequestError{
 					Message: err.Error(),
-					Details: nil,
-				}
+				})
 			}
 			req := c.Locals("parsed_request")
 			if req == nil {
-				return &ValidationRequestError{Message: "Invalid request"}
+				return af.handleError(c, &ValidationRequestError{Message: "Invalid request"})
 			}
 
 			// Enforce Authorization header when JWT auth is required.

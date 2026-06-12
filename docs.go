@@ -319,12 +319,9 @@ func (dg *DocsGenerator) generatePathWithSecurity(route RouteInfo) (OpenAPIPath,
 		operation.Parameters = dg.generatePathParameters(route.Path)
 	}
 
-	// Apply JWT auth security if requested for this route
-	if route.Options != nil && route.Options.RequireJWTAuth {
-		if operation.Security == nil {
-			operation.Security = []map[string][]string{}
-		}
-		operation.Security = append(operation.Security, map[string][]string{"bearerAuth": {}})
+	// Apply JWT auth security if requested for this route (skip if already added via schema field)
+	if route.Options != nil && route.Options.RequireJWTAuth && !hasBearer {
+		operation.Security = []map[string][]string{{"bearerAuth": {}}}
 		hasBearer = true
 	}
 

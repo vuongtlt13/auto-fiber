@@ -12,31 +12,33 @@ import (
 // The middleware parses request data from multiple sources (body, query, path, headers, cookies, form)
 // based on struct tags and validates the parsed data using the provided schema.
 // If customValidator is nil, it uses the global validator instance.
+//
+// Schema metadata (field info, parse tags) is pre-computed here at registration time,
+// not on every request.
 func AutoParseRequest(schema interface{}, customValidator *validator.Validate) fiber.Handler {
 	if customValidator == nil {
 		customValidator = GetValidator()
 	}
 
-	return func(c *fiber.Ctx) error {
-		// Create a new instance of the schema
-		schemaType := reflect.TypeOf(schema)
-		if schemaType.Kind() == reflect.Ptr {
-			schemaType = schemaType.Elem()
-		}
+	// Pre-compute schema type and field metadata once at registration time.
+	// getOrCacheSchemaMeta also validates parse tag sources and panics on typos.
+	schemaType := reflect.TypeOf(schema)
+	if schemaType.Kind() == reflect.Ptr {
+		schemaType = schemaType.Elem()
+	}
+	getOrCacheSchemaMeta(schemaType)
 
+	return func(c *fiber.Ctx) error {
 		req := reflect.New(schemaType).Interface()
 
-		// Parse from multiple sources based on struct tags and HTTP method
 		if err := parseFromMultipleSources(c, req); err != nil {
 			return err
 		}
 
-		// Validate the request
 		if err := customValidator.Struct(req); err != nil {
 			return err
 		}
 
-		// Store parsed request in context
 		c.Locals("parsed_request", req)
 		return nil
 	}
@@ -50,14 +52,11 @@ func ValidateAndJSON(c *fiber.Ctx, data interface{}) error {
 	schema := c.Locals("response_schema")
 	validatorInstance := c.Locals("response_validator")
 
-	// If no validation is set up, just return JSON
 	if schema == nil || validatorInstance == nil {
 		return c.JSON(data)
 	}
 
-	// Type assert validator
 	if v, ok := validatorInstance.(*validator.Validate); ok {
-		// Validate response data
 		if err := validateResponseData(data, schema, v); err != nil {
 			return &ValidationResponseError{
 				Message: "Response validation failed",

@@ -6,10 +6,87 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
+
+// schemaMetaCache stores pre-computed field metadata per schema type, keyed by reflect.Type.
+// Built once at registration time; reads are lock-free on the hot path.
+var schemaMetaCache sync.Map // map[reflect.Type]*cachedSchemaMeta
+
+// cachedSchemaMeta holds pre-computed metadata for a schema type.
+type cachedSchemaMeta struct {
+	hasBodyFields bool
+	fields        []cachedField
+}
+
+// cachedField stores the index and pre-parsed FieldInfo for a single struct field.
+// When embedded is non-nil the field is an anonymous embedded struct; info is nil.
+type cachedField struct {
+	index    int
+	info     *FieldInfo   // nil when embedded != nil
+	embedded reflect.Type // elem type of the embedded struct (non-nil = embedded field)
+	embIsPtr bool         // true when the field is declared as a pointer (*EmbeddedType)
+}
+
+// getOrCacheSchemaMeta returns (and lazily builds) the cached metadata for t.
+func getOrCacheSchemaMeta(t reflect.Type) *cachedSchemaMeta {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if v, ok := schemaMetaCache.Load(t); ok {
+		return v.(*cachedSchemaMeta)
+	}
+	meta := buildSchemaMeta(t)
+	schemaMetaCache.Store(t, meta)
+	return meta
+}
+
+// buildSchemaMeta computes the metadata for t. Panics on invalid parse tags so
+// callers (AutoParseRequest) catch programmer errors at registration time.
+func buildSchemaMeta(t reflect.Type) *cachedSchemaMeta {
+	meta := &cachedSchemaMeta{}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		ft := f.Type
+		embIsPtr := false
+		if ft.Kind() == reflect.Ptr {
+			ft = ft.Elem()
+			embIsPtr = true
+		}
+
+		// Embedded anonymous struct — recurse and propagate hasBodyFields.
+		if f.Anonymous && ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+			embMeta := getOrCacheSchemaMeta(ft)
+			if embMeta.hasBodyFields {
+				meta.hasBodyFields = true
+			}
+			meta.fields = append(meta.fields, cachedField{
+				index:    i,
+				embedded: ft,
+				embIsPtr: embIsPtr,
+			})
+			continue
+		}
+
+		// Check for explicit body source before building FieldInfo.
+		if pt := f.Tag.Get("parse"); pt != "" {
+			parts := strings.Split(pt, ",")
+			src := strings.SplitN(parts[0], ":", 2)[0]
+			if src == string(Body) {
+				meta.hasBodyFields = true
+			}
+		}
+
+		meta.fields = append(meta.fields, cachedField{
+			index: i,
+			info:  computeFieldInfo(f),
+		})
+	}
+	return meta
+}
 
 // parseFromMultipleSources parses request data from multiple sources (body, query, path, header, cookie, form)
 // based on struct tags and HTTP method. It fills the req struct with parsed values and returns an error if parsing fails.
@@ -17,15 +94,13 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 	reqValue := reflect.ValueOf(req).Elem()
 	reqType := reqValue.Type()
 
-	// Detect if schema explicitly asks for body fields (parse:"body:...").
-	hasBodyFields := schemaHasBodyFields(reqType)
+	meta := getOrCacheSchemaMeta(reqType)
 
-	// Parse body for POST/PUT/PATCH methods
+	// Parse body for POST/PUT/PATCH methods or when schema has explicit body fields.
 	method := strings.ToUpper(c.Method())
-	if method == "POST" || method == "PUT" || method == "PATCH" || (hasBodyFields && len(c.Body()) > 0) {
+	if method == "POST" || method == "PUT" || method == "PATCH" || (meta.hasBodyFields && len(c.Body()) > 0) {
 		contentType := c.Get("Content-Type")
 		if strings.Contains(contentType, "application/json") {
-			// For JSON requests, body is expected
 			if len(c.Body()) == 0 {
 				return &ParseError{
 					Field:   "body",
@@ -41,7 +116,6 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 				}
 			}
 		} else if len(c.Body()) > 0 {
-			// Non-JSON body parsing
 			if err := c.BodyParser(req); err != nil {
 				return &ParseError{
 					Field:   "body",
@@ -52,35 +126,31 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 		}
 	}
 
-	for i := 0; i < reqType.NumField(); i++ {
-		field := reqType.Field(i)
-		fieldValue := reqValue.Field(i)
+	for _, cf := range meta.fields {
+		fieldValue := reqValue.Field(cf.index)
 
-		// Handle embedded (anonymous) struct fields recursively
-		if field.Anonymous && (fieldValue.Kind() == reflect.Struct || (fieldValue.Kind() == reflect.Ptr && fieldValue.Type().Elem().Kind() == reflect.Struct)) {
-			if fieldValue.Kind() == reflect.Ptr {
+		// Embedded anonymous struct — recurse using its own cached metadata.
+		if cf.embedded != nil {
+			if cf.embIsPtr {
 				if fieldValue.IsNil() {
-					fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
+					fieldValue.Set(reflect.New(cf.embedded))
 				}
 				if err := parseFromMultipleSources(c, fieldValue.Interface()); err != nil {
-					return fmt.Errorf("embedded field %s: %w", field.Name, err)
+					return fmt.Errorf("embedded field %s: %w", reqType.Field(cf.index).Name, err)
 				}
 			} else if fieldValue.CanAddr() {
 				if err := parseFromMultipleSources(c, fieldValue.Addr().Interface()); err != nil {
-					return fmt.Errorf("embedded field %s: %w", field.Name, err)
+					return fmt.Errorf("embedded field %s: %w", reqType.Field(cf.index).Name, err)
 				}
 			}
 			continue
 		}
 
-		// Get parsing information from struct tags
-		fieldInfo := getFieldInfo(field, c.Method())
-		if fieldInfo == nil {
+		if cf.info == nil {
 			continue
 		}
 
-		// Parse based on source
-		if err := parseFieldFromSource(c, fieldInfo, fieldValue); err != nil {
+		if err := parseFieldFromSource(c, cf.info, fieldValue); err != nil {
 			return err
 		}
 	}
@@ -88,50 +158,13 @@ func parseFromMultipleSources(c *fiber.Ctx, req interface{}) error {
 	return nil
 }
 
-// schemaHasBodyFields returns true if the schema has any field with parse:"body:...".
-func schemaHasBodyFields(t reflect.Type) bool {
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return false
-	}
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.Anonymous {
-			ft := f.Type
-			if ft.Kind() == reflect.Ptr {
-				ft = ft.Elem()
-			}
-			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
-				if schemaHasBodyFields(ft) {
-					return true
-				}
-			}
-		}
-		parseTag := f.Tag.Get("parse")
-		if parseTag != "" {
-			parts := strings.Split(parseTag, ",")
-			sourcePart := parts[0]
-			sourceKey := strings.SplitN(sourcePart, ":", 2)
-			source := sourceKey[0]
-			if source == "body" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// getFieldInfo extracts parsing information from struct tags with smart defaults.
-// It returns a FieldInfo struct describing how to parse the field.
-func getFieldInfo(field reflect.StructField, httpMethod string) *FieldInfo {
-	// Check for parse tag first (highest priority)
+// computeFieldInfo extracts parsing information from struct tags with smart defaults.
+// Called once per field at schema-registration time, not per request.
+func computeFieldInfo(field reflect.StructField) *FieldInfo {
 	if parseTag := field.Tag.Get("parse"); parseTag != "" {
 		return parseParseTag(parseTag, field)
 	}
 
-	// If no parse tag, use auto parsing with json tag or field name
 	var key string
 	if jsonTag := field.Tag.Get("json"); jsonTag != "" && jsonTag != "-" {
 		jsonParts := strings.Split(jsonTag, ",")
@@ -159,13 +192,10 @@ func getFieldInfo(field reflect.StructField, httpMethod string) *FieldInfo {
 func getSmartSource(httpMethod string) ParseSource {
 	switch strings.ToUpper(httpMethod) {
 	case "GET":
-		// For GET requests, prioritize path → query → body
 		return Path
 	case "POST", "PUT", "PATCH":
-		// For mutation requests, prioritize body → path → query
 		return Body
 	case "DELETE":
-		// For DELETE requests, prioritize path → query
 		return Path
 	default:
 		return Body
@@ -174,6 +204,7 @@ func getSmartSource(httpMethod string) ParseSource {
 
 // parseParseTag parses the "parse" struct tag for complex parsing rules.
 // The tag format is: parse:"source:key,required,default:value"
+// Panics on unknown sources so programmer errors surface at registration time.
 func parseParseTag(parseTag string, field reflect.StructField) *FieldInfo {
 	parts := strings.Split(parseTag, ",")
 
@@ -191,14 +222,23 @@ func parseParseTag(parseTag string, field reflect.StructField) *FieldInfo {
 		key = field.Name
 	}
 
+	// Validate source at registration time — panics catch typos immediately.
+	switch source {
+	case Body, Query, Path, Header, Cookie, Form, Auto:
+		// valid
+	default:
+		panic(fmt.Sprintf(
+			"autofiber: invalid parse source %q on field %q — must be one of: body, query, path, header, cookie, form, auto",
+			source, field.Name,
+		))
+	}
+
 	required := strings.Contains(parseTag, "required")
 
-	// Extract default value if present
 	var defaultValue interface{}
 	for _, part := range parts {
 		if strings.HasPrefix(part, "default:") {
 			defaultStr := strings.TrimPrefix(part, "default:")
-			// Convert default string to appropriate type based on field type
 			defaultValue = convertDefaultValue(defaultStr, field.Type)
 			break
 		}
@@ -254,13 +294,13 @@ func parseFieldFromSource(c *fiber.Ctx, fieldInfo *FieldInfo, fieldValue reflect
 		value = c.FormValue(fieldInfo.Key)
 
 	case Auto:
-		// Smart parsing: try path first, then query
+		// Smart parsing: try path first, then query.
 		if pathValue := c.Params(fieldInfo.Key); pathValue != "" {
 			value = pathValue
 		} else if queryValue := c.Query(fieldInfo.Key); queryValue != "" {
 			value = queryValue
 		} else {
-			// Body will be handled by middleware BodyParser
+			// Body will be handled by BodyParser above.
 			return nil
 		}
 
@@ -303,23 +343,20 @@ func setFieldValue(field reflect.Value, value interface{}) error {
 		if str, ok := value.(string); ok {
 			field.SetString(str)
 		} else {
-			// Convert other types to string
 			field.SetString(fmt.Sprintf("%v", value))
 		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		switch v := value.(type) {
 		case string:
-			// Parse string to int
 			if intVal, err := parseInt(v); err == nil {
 				field.SetInt(int64(intVal))
 			} else {
 				return err
 			}
 		case int, int8, int16, int32, int64:
-			// Direct int assignment
-			field.SetInt(int64(v.(int)))
+			// Use reflect to safely convert any integer type to int64.
+			field.SetInt(reflect.ValueOf(v).Int())
 		case float64:
-			// Handle JSON numbers that might be float64
 			field.SetInt(int64(v))
 		default:
 			return fmt.Errorf("cannot convert %v to int", value)
@@ -344,7 +381,8 @@ func setFieldValue(field reflect.Value, value interface{}) error {
 		case float64:
 			field.SetFloat(v)
 		case int, int8, int16, int32, int64:
-			field.SetFloat(float64(v.(int)))
+			// Use reflect to safely convert any integer type to float64.
+			field.SetFloat(float64(reflect.ValueOf(v).Int()))
 		default:
 			return fmt.Errorf("cannot convert %v to float", value)
 		}
