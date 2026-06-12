@@ -1,5 +1,11 @@
 # AutoFiber
 
+[![CI](https://github.com/vuongtlt13/auto-fiber/actions/workflows/ci.yml/badge.svg)](https://github.com/vuongtlt13/auto-fiber/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/vuongtlt13/auto-fiber/branch/master/graph/badge.svg)](https://codecov.io/gh/vuongtlt13/auto-fiber)
+[![Go Report Card](https://goreportcard.com/badge/github.com/vuongtlt13/auto-fiber)](https://goreportcard.com/report/github.com/vuongtlt13/auto-fiber)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/vuongtlt13/auto-fiber)](go.mod)
+[![License](https://img.shields.io/github/license/vuongtlt13/auto-fiber)](LICENSE)
+
 A FastAPI-like wrapper for [Fiber](https://github.com/gofiber/fiber) that adds automatic request parsing, validation, and OpenAPI/Swagger documentation — from struct tags alone.
 
 ## Features
@@ -166,6 +172,45 @@ No error-handling code needed in your handler — AutoFiber generates this from 
 ```
 
 Visit `/swagger` for the interactive Swagger UI where you can try every endpoint directly in the browser.
+
+## How It Works
+
+Every request passes through a fixed pipeline built once at registration time — nothing is computed per-request beyond reading the actual values.
+
+```
+Incoming HTTP request
+        │
+        ▼
+┌───────────────────┐
+│   Middleware      │  group middleware → route middleware
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
+│  Parse Request    │  body (JSON/form) · path · query · header · cookie
+│                   │  driven by `parse` struct tags, cached at startup
+└────────┬──────────┘
+         │  ParseError → 400
+         ▼
+┌───────────────────┐
+│ Validate Request  │  go-playground/validator · `validate` struct tags
+└────────┬──────────┘
+         │  ValidationError → 422
+         ▼
+┌───────────────────┐
+│  Your Handler     │  func(c *fiber.Ctx, req *T) (interface{}, error)
+└────────┬──────────┘
+         │  error → Fiber error handler
+         ▼
+┌───────────────────┐
+│ Validate Response │  optional · `validate` tags on response struct
+└────────┬──────────┘
+         │
+         ▼
+     JSON / File
+```
+
+At startup, AutoFiber also walks all registered route schemas to emit a fully-typed OpenAPI 3.0 spec — no runtime reflection during requests.
 
 ## Documentation
 
